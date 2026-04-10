@@ -15,6 +15,7 @@
   let deviceId = "";
   let walletOrbs = 0;
   let highestLevel = 1;
+  let progressApplied = false;
 
   const isIos = () => /iPad|iPhone|iPod/.test(window.navigator.userAgent) ||
     (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
@@ -57,12 +58,26 @@
     }
   };
 
+  const applyProgressToGame = () => {
+    if (progressApplied) {
+      return;
+    }
+    if (!window.__slideyGame || typeof window.__slideyGame.startLevel !== "function") {
+      return;
+    }
+    if (highestLevel > 1) {
+      window.__slideyGame.startLevel(highestLevel);
+    }
+    progressApplied = true;
+  };
+
   const setLocalState = (nextWallet, nextHighestLevel) => {
     walletOrbs = Math.max(0, readNumber(nextWallet, walletOrbs));
     highestLevel = Math.max(1, readNumber(nextHighestLevel, highestLevel));
     window.localStorage.setItem(GUEST_WALLET_KEY, String(walletOrbs));
     window.localStorage.setItem(GUEST_LEVEL_KEY, String(highestLevel));
     applyWalletToGame();
+    applyProgressToGame();
   };
 
   const setButtonLabel = () => {
@@ -191,9 +206,15 @@
 
   const onOrbsEarned = (event) => {
     const gained = Math.max(0, readNumber(event.detail?.gained, 0));
-    const level = Math.max(1, readNumber(event.detail?.level, 1));
+    const unlockedLevel = Math.max(
+      1,
+      readNumber(
+        event.detail?.unlockedLevel,
+        readNumber(event.detail?.level, 1)
+      )
+    );
 
-    setLocalState(walletOrbs + gained, Math.max(highestLevel, level));
+    setLocalState(walletOrbs + gained, Math.max(highestLevel, unlockedLevel));
 
     if (supabaseClient) {
       void upsertRemoteProfile().catch(() => {
@@ -206,6 +227,7 @@
     walletOrbs = Math.max(0, readNumber(window.localStorage.getItem(GUEST_WALLET_KEY), 0));
     highestLevel = Math.max(1, readNumber(window.localStorage.getItem(GUEST_LEVEL_KEY), 1));
     applyWalletToGame();
+    applyProgressToGame();
     bootstrapSupabase();
     refreshInstallGate();
 
@@ -220,6 +242,7 @@
   });
 
   window.addEventListener("slidey:orbs-earned", onOrbsEarned);
+  window.addEventListener("load", applyProgressToGame);
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();

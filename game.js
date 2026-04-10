@@ -62,6 +62,7 @@
       this.boardMetrics = null;
       this.backdropCache = null;
       this.focusMaskCache = null;
+      this.exitVisualCache = new Map();
       this.camera = { x: 0, y: 0 };
       this.cameraVelocity = { x: 0, y: 0 };
       this.renderCamera = { x: 0, y: 0 };
@@ -179,6 +180,7 @@
       this.ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
       this.buildBackdropCache(width, height);
       this.buildFocusMaskCache(width, height);
+      this.exitVisualCache.clear();
 
       if (this.levelData) {
         this.updateBoardMetrics();
@@ -385,6 +387,7 @@
         return null;
       }
       const orbCells = orbAccessibility.orbCells;
+      const dynamicWallMap = this.buildDynamicWalls(grid, level, mainPathSet, orbCells, start, exit, rng);
 
       return {
         seed,
@@ -399,8 +402,66 @@
         slideSolution,
         slideGraph,
         slideAnalysis,
+        dynamicWallMap,
         maxCollapseTime: this.findMaxCollapse(collapseAt),
       };
+    }
+
+    buildDynamicWalls(grid, level, mainPathSet, orbCells, start, exit, rng) {
+      const map = new Map();
+      if (level < 20) {
+        return map;
+      }
+
+      const cols = grid[0].length;
+      const rows = grid.length;
+      const orbSet = new Set(orbCells.keys());
+      const candidates = [];
+
+      for (let y = 1; y < rows - 1; y += 1) {
+        for (let x = 1; x < cols - 1; x += 1) {
+          if (grid[y][x] !== "floor") {
+            continue;
+          }
+          const key = this.cellKey(x, y);
+          if (key === this.cellKey(start.x, start.y) || key === this.cellKey(exit.x, exit.y)) {
+            continue;
+          }
+          if (mainPathSet.has(key) || orbSet.has(key)) {
+            continue;
+          }
+          if (y <= 3 || y >= rows - 3) {
+            continue;
+          }
+          const floorNeighbors = this.countFloorNeighbors(grid, x, y);
+          if (floorNeighbors < 2 || floorNeighbors > 3) {
+            continue;
+          }
+          candidates.push({ x, y });
+        }
+      }
+
+      if (candidates.length === 0) {
+        return map;
+      }
+
+      rng.shuffle(candidates);
+      const dynamicCount = Math.min(candidates.length, Math.max(2, Math.min(14, Math.floor((level - 16) * 0.55))));
+      const cycleBase = this.clamp(2.7 - (level - 20) * 0.03, 1.35, 2.7);
+      const openWindowBase = this.clamp(0.44 - (level - 20) * 0.004, 0.26, 0.44);
+
+      for (let i = 0; i < dynamicCount; i += 1) {
+        const cell = candidates[i];
+        const cycle = cycleBase * (0.92 + rng.next() * 0.2);
+        const openWindow = this.clamp(openWindowBase + (rng.next() - 0.5) * 0.08, 0.22, 0.5);
+        map.set(this.cellKey(cell.x, cell.y), {
+          cycle,
+          openWindow,
+          offset: rng.next() * cycle,
+        });
+      }
+
+      return map;
     }
 
     findSlideSolution(grid, start, exit) {
@@ -1317,6 +1378,9 @@
       if (this.levelData.grid[y][x] !== "floor") {
         return false;
       }
+      if (this.isDynamicWallClosed(x, y)) {
+        return false;
+      }
       return !this.isCollapsed(x, y);
     }
 
@@ -1512,7 +1576,8 @@
         detail: {
           gained: gainedOrbs,
           total: this.runOrbs,
-          level: this.level
+          level: this.level,
+          unlockedLevel: this.level + 1
         }
       }));
       this.hideMessage();
@@ -1852,6 +1917,8 @@
           const collapsed = this.isCollapsed(x, y);
           const warning = this.isWarning(x, y);
           const type = this.levelData.grid[y][x];
+          const dynamicWall = type === "floor" && this.isDynamicWallCell(x, y);
+          const dynamicClosed = dynamicWall && this.isDynamicWallClosed(x, y);
 
           if (collapsed) {
             ctx.fillStyle = "rgba(0,0,0,0.94)";
@@ -1859,7 +1926,7 @@
             continue;
           }
 
-          if (type === "wall") {
+          if (type === "wall" || dynamicClosed) {
             wallCells.push({ x, y, px, py });
             if (warning) {
               warningWallCells.push({ x, y, px, py });
@@ -1869,6 +1936,14 @@
 
           ctx.fillStyle = warning ? `rgba(255,255,255,${0.06 + pulse * 0.04})` : "rgba(255,255,255,0.028)";
           ctx.fillRect(px, py, cellSize, cellSize);
+
+          if (dynamicWall) {
+            const cyclePulse = this.getDynamicWallPulse(x, y);
+            ctx.strokeStyle = `rgba(255,255,255,${0.08 + cyclePulse * 0.18})`;
+            ctx.lineWidth = Math.max(1, cellSize * 0.035);
+            const inset = Math.max(2, cellSize * 0.26);
+            ctx.strokeRect(px + inset, py + inset, cellSize - inset * 2, cellSize - inset * 2);
+          }
 
           if (warning) {
             ctx.strokeStyle = `rgba(255,255,255,${0.12 + pulse * 0.16})`;
@@ -1917,6 +1992,81 @@
       ctx.restore();
     }
 
+    getExitVisualCache(cellSize, glowStrength) {
+      const key = `${Math.round(cellSize * 10)}:${Math.round(glowStrength * 100)}`;
+      const cached = this.exitVisualCache.get(key);
+      if (cached) {
+        return cached;
+      }
+
+      const padding = Math.ceil(cellSize * 0.62);
+      const size = Math.ceil(cellSize + padding * 2);
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const c = canvas.getContext("2d");
+
+      if (!c) {
+        return { canvas, padding };
+      }
+
+      const outerInset = cellSize * 0.14;
+      const innerInset = cellSize * 0.27;
+      const frameWidth = cellSize - outerInset * 2;
+      const frameHeight = cellSize - outerInset * 2;
+      const coreWidth = cellSize - innerInset * 2;
+      const coreHeight = cellSize - innerInset * 2;
+
+      c.translate(padding, padding);
+
+      if (glowStrength > 0) {
+        c.save();
+        c.shadowBlur = 20 * glowStrength;
+        c.shadowColor = `rgba(255,255,255,${0.48 + glowStrength * 0.42})`;
+        c.strokeStyle = "rgba(255,255,255,0.92)";
+        c.lineWidth = Math.max(2, cellSize * 0.075);
+        c.strokeRect(outerInset, outerInset, frameWidth, frameHeight);
+        c.restore();
+      }
+
+      if (glowStrength > 0) {
+        c.save();
+        c.shadowBlur = 14 * glowStrength;
+        c.shadowColor = `rgba(255,255,255,${0.22 + glowStrength * 0.22})`;
+        c.strokeStyle = "rgba(255,255,255,0.42)";
+        c.lineWidth = Math.max(1, cellSize * 0.045);
+        c.strokeRect(innerInset, innerInset, coreWidth, coreHeight);
+        c.restore();
+      }
+
+      c.fillStyle = "rgba(255,255,255,0.26)";
+      c.fillRect(innerInset, innerInset, coreWidth, coreHeight);
+
+      c.save();
+      c.strokeStyle = "rgba(255,255,255,0.34)";
+      c.lineWidth = Math.max(1, cellSize * 0.04);
+      const corner = cellSize * 0.15;
+      c.beginPath();
+      c.moveTo(outerInset, outerInset + corner);
+      c.lineTo(outerInset, outerInset);
+      c.lineTo(outerInset + corner, outerInset);
+      c.moveTo(cellSize - outerInset - corner, outerInset);
+      c.lineTo(cellSize - outerInset, outerInset);
+      c.lineTo(cellSize - outerInset, outerInset + corner);
+      c.moveTo(outerInset, cellSize - outerInset - corner);
+      c.lineTo(outerInset, cellSize - outerInset);
+      c.lineTo(outerInset + corner, cellSize - outerInset);
+      c.moveTo(cellSize - outerInset - corner, cellSize - outerInset);
+      c.lineTo(cellSize - outerInset, cellSize - outerInset);
+      c.lineTo(cellSize - outerInset, cellSize - outerInset - corner);
+      c.stroke();
+      c.restore();
+
+      const snapshot = { canvas, padding, innerInset, coreWidth, coreHeight };
+      this.exitVisualCache.set(key, snapshot);
+      return snapshot;
+    }
+
     drawExit(ctx) {
       const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
       const enterBoost = this.exitEffect ? this.easeInOutSine(this.exitEffect.time / this.exitEffect.duration) : 0;
@@ -1938,32 +2088,15 @@
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
 
-      const outerInset = cellSize * 0.14;
+      const cached = this.getExitVisualCache(cellSize, glowStrength);
+      const aura = 0.16 + pulse * 0.08 + enterBoost * 0.1;
       const innerInset = cellSize * 0.27;
-      const frameWidth = cellSize - outerInset * 2;
-      const frameHeight = cellSize - outerInset * 2;
       const coreWidth = cellSize - innerInset * 2;
       const coreHeight = cellSize - innerInset * 2;
-      const aura = 0.18 + pulse * 0.1 + enterBoost * 0.12;
 
       ctx.save();
-      if (glowStrength > 0) {
-        ctx.shadowBlur = 20 * glowStrength;
-        ctx.shadowColor = `rgba(255,255,255,${0.48 + glowStrength * 0.42})`;
-      }
-      ctx.strokeStyle = `rgba(255,255,255,${0.86 + pulse * 0.08})`;
-      ctx.lineWidth = Math.max(2, cellSize * 0.075);
-      ctx.strokeRect(x + outerInset, y + outerInset, frameWidth, frameHeight);
-      ctx.restore();
-
-      ctx.save();
-      if (glowStrength > 0) {
-        ctx.shadowBlur = 14 * glowStrength;
-        ctx.shadowColor = `rgba(255,255,255,${0.18 + glowStrength * 0.24})`;
-      }
-      ctx.strokeStyle = `rgba(255,255,255,${0.34 + pulse * 0.12})`;
-      ctx.lineWidth = Math.max(1, cellSize * 0.045);
-      ctx.strokeRect(x + innerInset, y + innerInset, coreWidth, coreHeight);
+      ctx.globalAlpha = 0.86 + pulse * 0.1;
+      ctx.drawImage(cached.canvas, x - cached.padding, y - cached.padding);
       ctx.restore();
 
       if (enterBoost > 0 && !reducedEffects) {
@@ -1972,6 +2105,7 @@
         ctx.shadowColor = "rgba(255,255,255,0.72)";
         ctx.strokeStyle = `rgba(255,255,255,${0.22 + enterBoost * 0.26})`;
         ctx.lineWidth = Math.max(1, cellSize * 0.055);
+        const outerInset = cellSize * 0.14;
         const haloInset = outerInset - cellSize * (0.05 + enterBoost * 0.08);
         ctx.strokeRect(
           x + haloInset,
@@ -1999,26 +2133,6 @@
         ctx.fillRect(x + innerInset, bandY - bandHeight * 0.5, coreWidth, bandHeight);
       }
 
-      ctx.restore();
-
-      ctx.save();
-      ctx.strokeStyle = `rgba(255,255,255,${0.28 + pulse * 0.08})`;
-      ctx.lineWidth = Math.max(1, cellSize * 0.04);
-      const corner = cellSize * 0.15;
-      ctx.beginPath();
-      ctx.moveTo(x + outerInset, y + outerInset + corner);
-      ctx.lineTo(x + outerInset, y + outerInset);
-      ctx.lineTo(x + outerInset + corner, y + outerInset);
-      ctx.moveTo(x + cellSize - outerInset - corner, y + outerInset);
-      ctx.lineTo(x + cellSize - outerInset, y + outerInset);
-      ctx.lineTo(x + cellSize - outerInset, y + outerInset + corner);
-      ctx.moveTo(x + outerInset, y + cellSize - outerInset - corner);
-      ctx.lineTo(x + outerInset, y + cellSize - outerInset);
-      ctx.lineTo(x + outerInset + corner, y + cellSize - outerInset);
-      ctx.moveTo(x + cellSize - outerInset - corner, y + cellSize - outerInset);
-      ctx.lineTo(x + cellSize - outerInset, y + cellSize - outerInset);
-      ctx.lineTo(x + cellSize - outerInset, y + cellSize - outerInset - corner);
-      ctx.stroke();
       ctx.restore();
       ctx.restore();
     }
@@ -2562,9 +2676,41 @@
         y >= 0 &&
         y < this.levelData.rows &&
         x < this.levelData.cols &&
-        this.levelData.grid[y][x] === "wall" &&
+        (this.levelData.grid[y][x] === "wall" || this.isDynamicWallClosed(x, y)) &&
         !this.isCollapsed(x, y)
       );
+    }
+
+    isDynamicWallCell(x, y) {
+      if (!this.levelData || !this.levelData.dynamicWallMap) {
+        return false;
+      }
+      return this.levelData.dynamicWallMap.has(this.cellKey(x, y));
+    }
+
+    isDynamicWallClosed(x, y, time = this.levelTime) {
+      if (!this.isDynamicWallCell(x, y)) {
+        return false;
+      }
+      const config = this.levelData.dynamicWallMap.get(this.cellKey(x, y));
+      if (!config || config.cycle <= 0) {
+        return false;
+      }
+      const phase = ((time || 0) + config.offset) % config.cycle;
+      const openSpan = config.cycle * config.openWindow;
+      return phase > openSpan;
+    }
+
+    getDynamicWallPulse(x, y, time = this.levelTime) {
+      if (!this.isDynamicWallCell(x, y)) {
+        return 0;
+      }
+      const config = this.levelData.dynamicWallMap.get(this.cellKey(x, y));
+      if (!config || config.cycle <= 0) {
+        return 0;
+      }
+      const phase = ((time || 0) + config.offset) % config.cycle;
+      return 0.5 + Math.sin((phase / config.cycle) * Math.PI * 2) * 0.5;
     }
 
     resetCamera() {

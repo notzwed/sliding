@@ -1,4 +1,4 @@
-const CACHE_NAME = "slidey-v9";
+const CACHE_NAME = "slidey-v10";
 const CORE_ASSETS = [
   "./",
   "./index.html",
