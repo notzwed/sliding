@@ -40,7 +40,7 @@
   class NeonCollapseMaze {
     constructor() {
       this.canvas = document.getElementById("gameCanvas");
-      this.ctx = this.canvas.getContext("2d", { desynchronized: true });
+      this.ctx = this.canvas.getContext("2d", { alpha: false, desynchronized: false });
       this.levelValue = document.getElementById("levelValue");
       this.orbValue = document.getElementById("orbValue");
       this.runValue = document.getElementById("runValue");
@@ -1682,6 +1682,20 @@
       cacheCtx.fillStyle = lowerGlow;
       cacheCtx.fillRect(0, 0, cache.width, cache.height);
 
+      const vignette = cacheCtx.createRadialGradient(
+        cache.width * 0.5,
+        cache.height * 0.5,
+        Math.min(cache.width, cache.height) * 0.32,
+        cache.width * 0.5,
+        cache.height * 0.5,
+        Math.max(cache.width, cache.height) * 0.78
+      );
+      vignette.addColorStop(0, "rgba(0,0,0,0)");
+      vignette.addColorStop(0.62, "rgba(0,0,0,0.2)");
+      vignette.addColorStop(1, "rgba(0,0,0,0.5)");
+      cacheCtx.fillStyle = vignette;
+      cacheCtx.fillRect(0, 0, cache.width, cache.height);
+
       this.backdropCache = cache;
     }
 
@@ -2054,6 +2068,7 @@
       const height = size * scaleY;
       const px = centerX - width / 2 + offsetX;
       const py = centerY - height / 2 + offsetY;
+      const auraPulse = 0.84 + Math.sin(this.levelTime * 3.2) * 0.16;
 
       if (this.moveState && !this.exitEffect && trailStrength > 0) {
         const trail = this.smoothPulse(this.moveState.progress) * cellSize * 0.12;
@@ -2094,8 +2109,17 @@
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
       if (glowStrength > 0) {
-        ctx.shadowBlur = 12 * glowStrength;
-        ctx.shadowColor = `rgba(255,255,255,${0.45 + glowStrength * 0.55})`;
+        const auraRadius = Math.max(width, height) * (1.45 + auraPulse * 0.22);
+        const aura = ctx.createRadialGradient(centerX + offsetX, centerY + offsetY, 0, centerX + offsetX, centerY + offsetY, auraRadius);
+        aura.addColorStop(0, `rgba(255,255,255,${0.2 + glowStrength * 0.14})`);
+        aura.addColorStop(0.38, `rgba(255,255,255,${0.09 + glowStrength * 0.08})`);
+        aura.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = aura;
+        ctx.fillRect(centerX + offsetX - auraRadius, centerY + offsetY - auraRadius, auraRadius * 2, auraRadius * 2);
+      }
+      if (glowStrength > 0) {
+        ctx.shadowBlur = 16 * glowStrength;
+        ctx.shadowColor = `rgba(255,255,255,${0.52 + glowStrength * 0.48})`;
       }
       ctx.fillStyle = `rgba(255,255,255,${pulse})`;
       ctx.fillRect(px, py, width, height);
@@ -2651,8 +2675,13 @@
     computePerformanceProfile(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
       const coarsePointer = this.isCoarsePointer();
       const shortEdge = Math.max(1, Math.min(viewportWidth || 0, viewportHeight || 0));
+      const longEdge = Math.max(1, Math.max(viewportWidth || 0, viewportHeight || 0));
+      const viewportArea = Math.max(1, shortEdge * longEdge);
       const ultraCompact = coarsePointer && shortEdge < 420;
-      const reducedEffects = ultraCompact && shortEdge < 380;
+      const reducedEffects = coarsePointer && shortEdge < 360;
+      const renderBudget = coarsePointer ? 3200000 : 5600000;
+      const adaptiveCap = Math.sqrt(renderBudget / viewportArea);
+      const pixelRatioCap = this.clamp(adaptiveCap, 1.4, coarsePointer ? 2.35 : 3);
 
       return {
         isTouch: coarsePointer,
@@ -2660,12 +2689,12 @@
         reducedEffects,
         dynamicFocusMask: !reducedEffects,
         glowStrength: coarsePointer ? (ultraCompact ? 0.78 : 0.95) : 1,
-        trailStrength: coarsePointer ? (ultraCompact ? 0.35 : 0.85) : 1,
+        trailStrength: coarsePointer ? (ultraCompact ? 0.24 : 0.62) : 1,
         backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.82 : 0.95) : 1,
-        pixelRatioCap: coarsePointer ? (ultraCompact ? 1.75 : 2) : 2.5,
-        maxDelta: coarsePointer ? 0.09 : 0.05,
-        slideDurationScale: coarsePointer ? (ultraCompact ? 0.82 : 0.92) : 1,
-        ambientParticleCount: coarsePointer ? (ultraCompact ? 6 : 10) : 14,
+        pixelRatioCap,
+        maxDelta: coarsePointer ? 0.18 : 0.1,
+        slideDurationScale: coarsePointer ? (ultraCompact ? 0.9 : 0.96) : 1,
+        ambientParticleCount: coarsePointer ? (ultraCompact ? 3 : 6) : 14,
       };
     }
 

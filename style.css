@@ -395,9 +395,9 @@ body.install-locked .app-shell {
 
   body::after {
     inset: 0;
-    opacity: 0.11;
-    filter: blur(22px);
-    animation: driftGlow 24s linear infinite;
+    opacity: 0.09;
+    filter: blur(14px);
+    animation: none;
   }
 
   body.install-locked .app-shell {
@@ -410,8 +410,8 @@ body.install-locked .app-shell {
   .footer-bar,
   .message-panel,
   .install-gate {
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .hud::after,
@@ -423,8 +423,9 @@ body.install-locked .app-shell {
   }
 
   .game-stage::after {
-    opacity: 0.48;
-    animation-duration: 16s;
+    opacity: 0.32;
+    animation: none;
+    background-position: 0 0, 42% 0;
   }
 
   .message-panel {
@@ -453,8 +454,8 @@ body.install-locked .app-shell {
     padding: 8px 10px;
     gap: 8px;
     border-radius: 14px;
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .hud {
@@ -505,8 +506,8 @@ body.install-locked .app-shell {
     width: min(92%, 360px);
     padding: 16px 14px;
     border-radius: 16px;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .install-gate {
@@ -530,9 +531,9 @@ body.install-locked .app-shell {
   }
 
   body::after {
-    opacity: 0.14;
-    filter: blur(20px);
-    animation: driftGlow 26s linear infinite;
+    opacity: 0.12;
+    filter: blur(12px);
+    animation: none;
   }
 }
 
