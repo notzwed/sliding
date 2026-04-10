@@ -5,7 +5,7 @@
     slideBaseDuration: 0.08,
     slideCellDuration: 0.048,
     warningWindow: 1.45,
-    impactDuration: 0.22,
+    impactDuration: 0.28,
     introFocusDuration: 1.15,
     maxLevel: 99,
   };
@@ -63,6 +63,7 @@
       this.backdropCache = null;
       this.focusMaskCache = null;
       this.camera = { x: 0, y: 0 };
+      this.cameraVelocity = { x: 0, y: 0 };
       this.ambientField = [];
       this.introFocusTime = 0;
       this.impactEffect = null;
@@ -1358,8 +1359,8 @@
     updateMovement(delta) {
       if (this.moveState) {
         this.moveState.progress = Math.min(1, this.moveState.progress + delta / this.moveState.duration);
-        const eased = this.easeInOutSine(this.moveState.progress);
-        const flow = this.smoothPulse(this.moveState.progress) * 0.014;
+        const eased = this.easeInOutCubic(this.moveState.progress);
+        const flow = this.smoothPulse(this.moveState.progress) * 0.01;
         this.player.renderX = this.lerp(this.moveState.from.x, this.moveState.to.x, eased) + this.moveState.dy * flow;
         this.player.renderY = this.lerp(this.moveState.from.y, this.moveState.to.y, eased) - this.moveState.dx * flow;
 
@@ -1418,7 +1419,7 @@
       this.impactEffect = null;
       this.exitEffect = {
         time: 0,
-        duration: 0.42,
+        duration: 0.5,
       };
       this.setStatusText(
         "Gate lock acquired. The cube is being pulled into the exit.",
@@ -1437,8 +1438,8 @@
 
       this.player.x = this.levelData.exit.x;
       this.player.y = this.levelData.exit.y;
-      this.player.renderX = this.lerp(this.player.renderX, this.levelData.exit.x, 0.28 + eased * 0.16);
-      this.player.renderY = this.lerp(this.player.renderY, this.levelData.exit.y, 0.28 + eased * 0.16);
+      this.player.renderX = this.lerp(this.player.renderX, this.levelData.exit.x, 0.24 + eased * 0.14);
+      this.player.renderY = this.lerp(this.player.renderY, this.levelData.exit.y, 0.24 + eased * 0.14);
 
       if (progress >= 1) {
         this.completeWinLevel();
@@ -1613,12 +1614,12 @@
 
     getSceneOpacity() {
       if (this.phase === "won") {
-        const progress = this.easeOut(this.clamp(this.winOverlayTime / 0.42, 0, 1));
+        const progress = this.easeOut(this.clamp(this.winOverlayTime / 0.5, 0, 1));
         return 1 - progress * 0.72;
       }
 
       if (this.phase === "lost") {
-        const progress = this.easeOut(this.clamp(this.loseOverlayTime / 0.34, 0, 1));
+        const progress = this.easeOut(this.clamp(this.loseOverlayTime / 0.42, 0, 1));
         return 1 - progress * 0.82;
       }
 
@@ -2242,7 +2243,7 @@
     }
 
     drawWinOverlay(ctx, width, height) {
-      const progress = this.easeOut(this.clamp(this.winOverlayTime / 0.42, 0, 1));
+      const progress = this.easeOut(this.clamp(this.winOverlayTime / 0.5, 0, 1));
       const pulse = 0.78 + Math.sin((this.levelTime + this.winOverlayTime) * 4.2) * 0.08;
       const prompt = this.isCoarsePointer() ? "Tap for the next level" : "Press for the next level";
       const title = `Level ${String(this.level).padStart(2, "0")} complete`;
@@ -2299,7 +2300,7 @@
     }
 
     drawLoseOverlay(ctx, width, height) {
-      const progress = this.easeOut(this.clamp(this.loseOverlayTime / 0.34, 0, 1));
+      const progress = this.easeOut(this.clamp(this.loseOverlayTime / 0.42, 0, 1));
       const pulse = 0.74 + Math.sin((this.levelTime + this.loseOverlayTime) * 4.8) * 0.06;
       const prompt = this.isCoarsePointer() ? "Tap to retry" : "Press to retry";
       const title = "Collapsed";
@@ -2551,14 +2552,19 @@
       const target = this.getCameraTarget();
       this.camera.x = target.x;
       this.camera.y = target.y;
+      this.cameraVelocity.x = 0;
+      this.cameraVelocity.y = 0;
     }
 
     updateCamera() {
       const target = this.getCameraTarget();
       const delta = Math.max(0.001, Math.min(0.05, this.lastDelta || 1 / 60));
-      const smoothing = 1 - Math.exp(-delta * (this.introFocusTime > 0 ? 11.5 : 8.5));
-      this.camera.x = this.lerp(this.camera.x, target.x, smoothing);
-      this.camera.y = this.lerp(this.camera.y, target.y, smoothing);
+      const stiffness = this.moveState ? 15.5 : this.introFocusTime > 0 ? 13.5 : 10.5;
+      const damping = 0.82;
+      this.cameraVelocity.x = (this.cameraVelocity.x + (target.x - this.camera.x) * stiffness * delta) * damping;
+      this.cameraVelocity.y = (this.cameraVelocity.y + (target.y - this.camera.y) * stiffness * delta) * damping;
+      this.camera.x += this.cameraVelocity.x;
+      this.camera.y += this.cameraVelocity.y;
     }
 
     getCameraTarget() {
@@ -2693,7 +2699,7 @@
         backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.82 : 0.95) : 1,
         pixelRatioCap,
         maxDelta: coarsePointer ? 0.18 : 0.1,
-        slideDurationScale: coarsePointer ? (ultraCompact ? 0.9 : 0.96) : 1,
+        slideDurationScale: coarsePointer ? (ultraCompact ? 0.86 : 0.92) : 0.98,
         ambientParticleCount: coarsePointer ? (ultraCompact ? 3 : 6) : 14,
       };
     }
@@ -2724,6 +2730,13 @@
 
     easeInOutSine(value) {
       return -(Math.cos(Math.PI * value) - 1) / 2;
+    }
+
+    easeInOutCubic(value) {
+      if (value < 0.5) {
+        return 4 * value * value * value;
+      }
+      return 1 - Math.pow(-2 * value + 2, 3) / 2;
     }
 
     smoothPulse(value) {

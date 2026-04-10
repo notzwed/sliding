@@ -166,7 +166,8 @@ body.install-locked .app-shell {
   box-shadow:
     0 0 10px rgba(255, 255, 255, 0.6),
     0 0 18px rgba(255, 255, 255, 0.3);
-  transition: width 100ms linear;
+  transition: width 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width;
 }
 
 .game-stage {
@@ -182,6 +183,7 @@ body.install-locked .app-shell {
     0 0 0 1px rgba(255, 255, 255, 0.05) inset,
     0 0 36px rgba(255, 255, 255, 0.08);
   contain: layout paint size;
+  isolation: isolate;
 }
 
 .game-stage::before,
@@ -216,6 +218,7 @@ body.install-locked .app-shell {
   cursor: grab;
   position: relative;
   z-index: 1;
+  will-change: transform;
 }
 
 #gameCanvas:active {
@@ -240,6 +243,7 @@ body.install-locked .app-shell {
   backdrop-filter: blur(16px);
   cursor: pointer;
   animation: panelEnter 240ms cubic-bezier(0.2, 0.85, 0.24, 1);
+  will-change: transform, opacity;
 }
 
 .install-gate {
