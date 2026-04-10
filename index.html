@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#020202">
+  <title>Neon Collapse Maze</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <div class="hud">
+      <div class="hud-block">
+        <span class="hud-label">Level</span>
+        <strong id="levelValue">01</strong>
+      </div>
+      <div class="hud-block hud-center">
+        <span class="hud-label">Collapse</span>
+        <div class="danger-track">
+          <div id="dangerFill" class="danger-fill"></div>
+        </div>
+      </div>
+      <div class="hud-block hud-right">
+        <span class="hud-label">Orbs</span>
+        <strong id="orbValue">00 / 00</strong>
+      </div>
+    </div>
+
+    <main class="game-stage">
+      <canvas id="gameCanvas" aria-label="Neon maze game"></canvas>
+
+      <div id="messagePanel" class="message-panel hidden">
+        <p id="messageTitle" class="message-title"></p>
+        <p id="messageText" class="message-text"></p>
+      </div>
+    </main>
+
+    <div class="footer-bar">
+      <div class="footer-item">
+        <span class="hud-label">Run</span>
+        <strong id="runValue">00</strong>
+      </div>
+      <p id="statusText" class="status-text">Swipe or use WASD / arrow keys. Collect as many orbs as possible and escape through the exit.</p>
+    </div>
+  </div>
+
+  <script src="./game.js"></script>
+</body>
+</html>
