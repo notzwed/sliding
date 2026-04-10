@@ -1,22 +1,20 @@
 "use strict";
 
 (function () {
-  const ONBOARDING_REWARD = 2000;
-  const GUEST_WALLET_KEY = "slidey_guest_wallet";
+  const GUEST_WALLET_KEY = "slidey_wallet";
+  const GUEST_LEVEL_KEY = "slidey_highest_level";
+  const DEVICE_ID_KEY = "slidey_device_id";
+  const REMOTE_TABLE = "player_profiles";
+
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
-  const accountState = document.getElementById("accountState");
-  const accountEmail = document.getElementById("accountEmail");
-  const accountPassword = document.getElementById("accountPassword");
-  const registerAction = document.getElementById("registerAction");
-  const loginAction = document.getElementById("loginAction");
-  const logoutAction = document.getElementById("logoutAction");
 
   let deferredInstallPrompt = null;
   let promptedOnce = false;
   let supabaseClient = null;
-  let currentUser = null;
+  let deviceId = "";
   let walletOrbs = 0;
+  let highestLevel = 1;
 
   const isIos = () => /iPad|iPhone|iPod/.test(window.navigator.userAgent) ||
     (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
@@ -30,34 +28,24 @@
 
   const shouldRequireInstall = () => isInstallTargetDevice() && !isStandalone();
 
-  const setAccountText = (text) => {
-    if (accountState) {
-      accountState.textContent = text;
-    }
+  const readNumber = (value, fallback) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? Math.floor(num) : fallback;
   };
 
-  const setAuthButtonsState = (busy) => {
-    if (registerAction) {
-      registerAction.disabled = busy;
+  const getOrCreateDeviceId = () => {
+    const existing = window.localStorage.getItem(DEVICE_ID_KEY);
+    if (existing) {
+      return existing;
     }
-    if (loginAction) {
-      loginAction.disabled = busy;
-    }
-    if (logoutAction) {
-      logoutAction.disabled = busy;
-    }
-    if (accountEmail) {
-      accountEmail.disabled = busy;
-    }
-    if (accountPassword) {
-      accountPassword.disabled = busy;
-    }
+
+    const randomTail = Math.random().toString(36).slice(2, 10);
+    const generated = `slidey-${Date.now().toString(36)}-${randomTail}`;
+    window.localStorage.setItem(DEVICE_ID_KEY, generated);
+    return generated;
   };
 
-  const setWallet = (value) => {
-    walletOrbs = Math.max(0, Math.floor(Number(value) || 0));
-    window.localStorage.setItem(GUEST_WALLET_KEY, String(walletOrbs));
-
+  const applyWalletToGame = () => {
     if (window.__slideyGame && typeof window.__slideyGame.setWalletOrbs === "function") {
       window.__slideyGame.setWalletOrbs(walletOrbs);
       return;
@@ -69,121 +57,12 @@
     }
   };
 
-  const extractBalance = (rpcData) => {
-    if (typeof rpcData === "number") {
-      return rpcData;
-    }
-    if (Array.isArray(rpcData) && rpcData.length > 0) {
-      const row = rpcData[0];
-      if (row && typeof row.orb_balance !== "undefined") {
-        return row.orb_balance;
-      }
-    }
-    if (rpcData && typeof rpcData === "object" && typeof rpcData.orb_balance !== "undefined") {
-      return rpcData.orb_balance;
-    }
-    return null;
-  };
-
-  const fetchProfile = async (userId) => {
-    const { data, error } = await supabaseClient
-      .from("profiles")
-      .select("orb_balance,reward_granted,email")
-      .eq("id", userId)
-      .single();
-    if (error) {
-      throw error;
-    }
-    return data;
-  };
-
-  const ensureProfile = async (user) => {
-    const payload = {
-      id: user.id,
-      email: user.email || null
-    };
-    const { error } = await supabaseClient.from("profiles").upsert(payload, { onConflict: "id" });
-    if (error) {
-      throw error;
-    }
-  };
-
-  const grantSignupReward = async () => {
-    try {
-      const { data, error } = await supabaseClient.rpc("grant_signup_reward", {
-        reward_amount: ONBOARDING_REWARD
-      });
-      if (error) {
-        throw error;
-      }
-      const balance = extractBalance(data);
-      if (balance !== null) {
-        return balance;
-      }
-    } catch (_error) {
-    }
-
-    const profile = await fetchProfile(currentUser.id);
-    if (profile.reward_granted) {
-      return profile.orb_balance || 0;
-    }
-
-    const target = (profile.orb_balance || 0) + ONBOARDING_REWARD;
-    const { data, error } = await supabaseClient
-      .from("profiles")
-      .update({ orb_balance: target, reward_granted: true })
-      .eq("id", currentUser.id)
-      .eq("reward_granted", false)
-      .select("orb_balance")
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    return data.orb_balance || target;
-  };
-
-  const addOrbsRemote = async (delta) => {
-    try {
-      const { data, error } = await supabaseClient.rpc("increment_player_orbs", {
-        orb_delta: delta
-      });
-      if (error) {
-        throw error;
-      }
-      const balance = extractBalance(data);
-      if (balance !== null) {
-        return balance;
-      }
-    } catch (_error) {
-    }
-
-    const profile = await fetchProfile(currentUser.id);
-    const target = (profile.orb_balance || 0) + delta;
-    const { data, error } = await supabaseClient
-      .from("profiles")
-      .update({ orb_balance: target })
-      .eq("id", currentUser.id)
-      .select("orb_balance")
-      .single();
-    if (error) {
-      throw error;
-    }
-    return data.orb_balance || target;
-  };
-
-  const syncWalletFromAccount = async () => {
-    if (!supabaseClient || !currentUser) {
-      return;
-    }
-
-    await ensureProfile(currentUser);
-    const rewardedBalance = await grantSignupReward();
-    const profile = await fetchProfile(currentUser.id);
-    const finalBalance = Math.max(profile.orb_balance || 0, rewardedBalance || 0);
-    setWallet(finalBalance);
-    setAccountText(`${currentUser.email || "Player"} • ${finalBalance} orbs`);
+  const setLocalState = (nextWallet, nextHighestLevel) => {
+    walletOrbs = Math.max(0, readNumber(nextWallet, walletOrbs));
+    highestLevel = Math.max(1, readNumber(nextHighestLevel, highestLevel));
+    window.localStorage.setItem(GUEST_WALLET_KEY, String(walletOrbs));
+    window.localStorage.setItem(GUEST_LEVEL_KEY, String(highestLevel));
+    applyWalletToGame();
   };
 
   const setButtonLabel = () => {
@@ -255,161 +134,92 @@
     const anonKey = window.SLIDEY_SUPABASE_ANON_KEY;
 
     if (!url || !anonKey || !window.supabase || typeof window.supabase.createClient !== "function") {
-      setAccountText(`Guest mode • ${walletOrbs} orbs`);
       return;
     }
 
     supabaseClient = window.supabase.createClient(url, anonKey, {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false
       }
     });
   };
 
-  const handleRegister = async () => {
-    if (!supabaseClient || !accountEmail || !accountPassword) {
-      return;
+  const fetchRemoteProfile = async () => {
+    const { data, error } = await supabaseClient
+      .from(REMOTE_TABLE)
+      .select("wallet_orbs,highest_level")
+      .eq("device_id", deviceId)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      throw error;
     }
 
-    const email = accountEmail.value.trim();
-    const password = accountPassword.value;
-    if (!email || !password) {
-      setAccountText("Insert email and password");
-      return;
-    }
+    return data || null;
+  };
 
-    setAuthButtonsState(true);
-    try {
-      const { data, error } = await supabaseClient.auth.signUp({ email, password });
-      if (error) {
-        throw error;
-      }
-
-      if (data.user && data.session) {
-        currentUser = data.user;
-        await syncWalletFromAccount();
-        setAccountText(`${email} • bonus +${ONBOARDING_REWARD} granted`);
-      } else {
-        setAccountText("Registration done. Confirm email, then login.");
-      }
-    } catch (error) {
-      setAccountText(`Register failed: ${error.message || "unknown error"}`);
-    } finally {
-      setAuthButtonsState(false);
+  const upsertRemoteProfile = async () => {
+    const payload = {
+      device_id: deviceId,
+      wallet_orbs: walletOrbs,
+      highest_level: highestLevel
+    };
+    const { error } = await supabaseClient.from(REMOTE_TABLE).upsert(payload, { onConflict: "device_id" });
+    if (error) {
+      throw error;
     }
   };
 
-  const handleLogin = async () => {
-    if (!supabaseClient || !accountEmail || !accountPassword) {
-      return;
-    }
-
-    const email = accountEmail.value.trim();
-    const password = accountPassword.value;
-    if (!email || !password) {
-      setAccountText("Insert email and password");
-      return;
-    }
-
-    setAuthButtonsState(true);
-    try {
-      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-      if (error) {
-        throw error;
-      }
-      currentUser = data.user || null;
-      if (currentUser) {
-        await syncWalletFromAccount();
-      }
-    } catch (error) {
-      setAccountText(`Login failed: ${error.message || "unknown error"}`);
-    } finally {
-      setAuthButtonsState(false);
-    }
-  };
-
-  const handleLogout = async () => {
+  const syncWithRemote = async () => {
     if (!supabaseClient) {
       return;
     }
-    setAuthButtonsState(true);
-    try {
-      await supabaseClient.auth.signOut();
-      currentUser = null;
-      setWallet(Number(window.localStorage.getItem(GUEST_WALLET_KEY) || 0));
-      setAccountText(`Guest mode • ${walletOrbs} orbs`);
-    } finally {
-      setAuthButtonsState(false);
+
+    const remote = await fetchRemoteProfile();
+    if (!remote) {
+      await upsertRemoteProfile();
+      return;
+    }
+
+    const mergedWallet = Math.max(walletOrbs, readNumber(remote.wallet_orbs, 0));
+    const mergedLevel = Math.max(highestLevel, readNumber(remote.highest_level, 1));
+    setLocalState(mergedWallet, mergedLevel);
+    await upsertRemoteProfile();
+  };
+
+  const onOrbsEarned = (event) => {
+    const gained = Math.max(0, readNumber(event.detail?.gained, 0));
+    const level = Math.max(1, readNumber(event.detail?.level, 1));
+
+    setLocalState(walletOrbs + gained, Math.max(highestLevel, level));
+
+    if (supabaseClient) {
+      void upsertRemoteProfile().catch(() => {
+      });
     }
   };
 
-  const bootAuth = async () => {
+  const init = () => {
+    deviceId = getOrCreateDeviceId();
+    walletOrbs = Math.max(0, readNumber(window.localStorage.getItem(GUEST_WALLET_KEY), 0));
+    highestLevel = Math.max(1, readNumber(window.localStorage.getItem(GUEST_LEVEL_KEY), 1));
+    applyWalletToGame();
     bootstrapSupabase();
-    if (!supabaseClient) {
-      return;
-    }
+    refreshInstallGate();
 
-    const { data } = await supabaseClient.auth.getSession();
-    currentUser = data.session?.user || null;
-    if (currentUser) {
-      await syncWalletFromAccount();
+    if (supabaseClient) {
+      void syncWithRemote().catch(() => {
+      });
     }
-
-    supabaseClient.auth.onAuthStateChange(async (_event, session) => {
-      currentUser = session?.user || null;
-      if (currentUser) {
-        try {
-          await syncWalletFromAccount();
-        } catch (error) {
-          setAccountText(`Sync failed: ${error.message || "error"}`);
-        }
-      } else {
-        setWallet(Number(window.localStorage.getItem(GUEST_WALLET_KEY) || 0));
-        setAccountText(`Guest mode • ${walletOrbs} orbs`);
-      }
-    });
   };
 
   installAction?.addEventListener("click", () => {
     void handleInstallAction();
   });
 
-  registerAction?.addEventListener("click", () => {
-    void handleRegister();
-  });
-
-  loginAction?.addEventListener("click", () => {
-    void handleLogin();
-  });
-
-  logoutAction?.addEventListener("click", () => {
-    void handleLogout();
-  });
-
-  window.addEventListener("slidey:orbs-earned", (event) => {
-    const gained = Math.max(0, Math.floor(Number(event.detail?.gained) || 0));
-    if (gained <= 0) {
-      return;
-    }
-
-    if (!supabaseClient || !currentUser) {
-      setWallet(walletOrbs + gained);
-      setAccountText(`Guest mode • ${walletOrbs} orbs`);
-      return;
-    }
-
-    void (async () => {
-      try {
-        const remoteBalance = await addOrbsRemote(gained);
-        setWallet(remoteBalance);
-        setAccountText(`${currentUser.email || "Player"} • ${walletOrbs} orbs`);
-      } catch (error) {
-        setAccountText(`Wallet sync failed: ${error.message || "error"}`);
-      }
-    })();
-  });
+  window.addEventListener("slidey:orbs-earned", onOrbsEarned);
 
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -442,9 +252,5 @@
     );
   }
 
-  const initialGuestWallet = Number(window.localStorage.getItem(GUEST_WALLET_KEY) || 0);
-  setWallet(initialGuestWallet);
-  setAccountText(`Guest mode • ${walletOrbs} orbs`);
-  refreshInstallGate();
-  void bootAuth();
+  init();
 })();
