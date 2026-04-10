@@ -64,6 +64,7 @@
       this.focusMaskCache = null;
       this.camera = { x: 0, y: 0 };
       this.cameraVelocity = { x: 0, y: 0 };
+      this.renderCamera = { x: 0, y: 0 };
       this.ambientField = [];
       this.introFocusTime = 0;
       this.impactEffect = null;
@@ -1360,8 +1361,9 @@
     updateMovement(delta) {
       if (this.moveState) {
         this.moveState.progress = Math.min(1, this.moveState.progress + delta / this.moveState.duration);
-        const eased = this.easeInOutCubic(this.moveState.progress);
-        const flow = this.smoothPulse(this.moveState.progress) * 0.01;
+        const motionBlend = this.moveState.progress;
+        const eased = this.lerp(this.easeInOutSine(motionBlend), this.easeInOutCubic(motionBlend), 0.35);
+        const flow = this.smoothPulse(motionBlend) * 0.0085;
         this.player.renderX = this.lerp(this.moveState.from.x, this.moveState.to.x, eased) + this.moveState.dy * flow;
         this.player.renderY = this.lerp(this.moveState.from.y, this.moveState.to.y, eased) - this.moveState.dx * flow;
 
@@ -1798,8 +1800,10 @@
       }
 
       const time = this.levelTime || 0;
-      const parallaxX = (this.camera?.x || 0) * 0.028;
-      const parallaxY = (this.camera?.y || 0) * 0.028;
+      const cameraX = this.renderCamera?.x ?? this.camera?.x ?? 0;
+      const cameraY = this.renderCamera?.y ?? this.camera?.y ?? 0;
+      const parallaxX = cameraX * 0.028;
+      const parallaxY = cameraY * 0.028;
 
       ctx.save();
       ctx.lineCap = "round";
@@ -2569,17 +2573,19 @@
       this.camera.y = target.y;
       this.cameraVelocity.x = 0;
       this.cameraVelocity.y = 0;
+      this.renderCamera.x = target.x;
+      this.renderCamera.y = target.y;
     }
 
     updateCamera() {
       const target = this.getCameraTarget();
       const delta = Math.max(0.001, Math.min(0.05, this.lastDelta || 1 / 60));
-      const stiffness = this.moveState ? 15.5 : this.introFocusTime > 0 ? 13.5 : 10.5;
-      const damping = 0.82;
-      this.cameraVelocity.x = (this.cameraVelocity.x + (target.x - this.camera.x) * stiffness * delta) * damping;
-      this.cameraVelocity.y = (this.cameraVelocity.y + (target.y - this.camera.y) * stiffness * delta) * damping;
-      this.camera.x += this.cameraVelocity.x;
-      this.camera.y += this.cameraVelocity.y;
+      const follow = 1 - Math.exp(-delta * (this.moveState ? 13.5 : 9.5));
+      this.camera.x = this.lerp(this.camera.x, target.x, follow);
+      this.camera.y = this.lerp(this.camera.y, target.y, follow);
+      const snap = 1 / Math.max(1, this.pixelRatio || 1);
+      this.renderCamera.x = Math.round(this.camera.x / snap) * snap;
+      this.renderCamera.y = Math.round(this.camera.y / snap) * snap;
     }
 
     getCameraTarget() {
@@ -2591,13 +2597,13 @@
 
       if (this.moveState) {
         const lookAheadFactor = Math.sin(this.moveState.progress * Math.PI * 0.5);
-        const lookAheadCells = Math.min(0.95, 0.38 + this.moveState.distance * 0.04);
+        const lookAheadCells = Math.min(0.8, 0.3 + this.moveState.distance * 0.035);
         lookAheadX += this.moveState.dx * cellSize * lookAheadCells * lookAheadFactor;
         lookAheadY += this.moveState.dy * cellSize * lookAheadCells * lookAheadFactor;
       }
 
       if (this.impactEffect) {
-        const impactBlend = this.springOut(1 - this.impactEffect.time / this.impactEffect.duration) * 0.16;
+        const impactBlend = this.springOut(1 - this.impactEffect.time / this.impactEffect.duration) * 0.08;
         lookAheadX -= this.impactEffect.dx * cellSize * impactBlend;
         lookAheadY -= this.impactEffect.dy * cellSize * impactBlend;
       }
@@ -2610,19 +2616,23 @@
 
     getVisibleRange() {
       const { cellSize, viewportWidth, viewportHeight } = this.boardMetrics;
+      const cameraX = this.renderCamera?.x ?? this.camera.x;
+      const cameraY = this.renderCamera?.y ?? this.camera.y;
       return {
-        startX: this.clamp(Math.floor(this.camera.x / cellSize) - 2, 0, this.levelData.cols - 1),
-        endX: this.clamp(Math.ceil((this.camera.x + viewportWidth) / cellSize) + 2, 0, this.levelData.cols - 1),
-        startY: this.clamp(Math.floor(this.camera.y / cellSize) - 2, 0, this.levelData.rows - 1),
-        endY: this.clamp(Math.ceil((this.camera.y + viewportHeight) / cellSize) + 2, 0, this.levelData.rows - 1),
+        startX: this.clamp(Math.floor(cameraX / cellSize) - 2, 0, this.levelData.cols - 1),
+        endX: this.clamp(Math.ceil((cameraX + viewportWidth) / cellSize) + 2, 0, this.levelData.cols - 1),
+        startY: this.clamp(Math.floor(cameraY / cellSize) - 2, 0, this.levelData.rows - 1),
+        endY: this.clamp(Math.ceil((cameraY + viewportHeight) / cellSize) + 2, 0, this.levelData.rows - 1),
       };
     }
 
     toScreen(cellX, cellY) {
       const { cellSize, frameX, frameY } = this.boardMetrics;
+      const cameraX = this.renderCamera?.x ?? this.camera.x;
+      const cameraY = this.renderCamera?.y ?? this.camera.y;
       return {
-        x: frameX + cellX * cellSize - this.camera.x,
-        y: frameY + cellY * cellSize - this.camera.y,
+        x: frameX + cellX * cellSize - cameraX,
+        y: frameY + cellY * cellSize - cameraY,
       };
     }
 
