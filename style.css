@@ -34,6 +34,10 @@ body {
   user-select: none;
 }
 
+body.install-locked {
+  overflow: hidden;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -73,6 +77,14 @@ body::after {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 14px;
+  transition: filter 220ms ease, transform 220ms ease, opacity 220ms ease;
+}
+
+body.install-locked .app-shell {
+  filter: blur(22px) saturate(0.28);
+  transform: scale(0.985);
+  opacity: 0.68;
+  pointer-events: none;
 }
 
 .hud,
@@ -228,6 +240,73 @@ body::after {
   animation: panelEnter 240ms cubic-bezier(0.2, 0.85, 0.24, 1);
 }
 
+.install-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding:
+    max(20px, env(safe-area-inset-top))
+    max(20px, env(safe-area-inset-right))
+    max(20px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(10px);
+}
+
+.install-action {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08)),
+    rgba(0, 0, 0, 0.82);
+  color: #fff;
+  min-width: min(84vw, 420px);
+  min-height: 72px;
+  padding: 18px 26px;
+  font-family: var(--font-ui);
+  font-size: clamp(1rem, 2.8vw, 1.22rem);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 0 38px rgba(255, 255, 255, 0.14);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.install-action:hover,
+.install-action:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset,
+    0 0 46px rgba(255, 255, 255, 0.22);
+  outline: none;
+}
+
+.install-action:active {
+  transform: translateY(0);
+}
+
+.install-action:disabled {
+  opacity: 0.76;
+  cursor: progress;
+}
+
+.install-action.is-hint {
+  letter-spacing: 0.08em;
+  text-transform: none;
+  font-size: clamp(0.96rem, 2.6vw, 1.08rem);
+}
+
 .hidden {
   display: none;
 }
@@ -373,6 +452,21 @@ body::after {
     border-radius: 16px;
   }
 
+  .install-gate {
+    padding:
+      max(16px, env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+  }
+
+  .install-action {
+    min-width: min(90vw, 360px);
+    min-height: 68px;
+    padding: 16px 20px;
+    letter-spacing: 0.1em;
+  }
+
   body::before {
     background-size: 36px 36px;
     opacity: 0.12;
@@ -400,6 +494,13 @@ body::after {
 
   .status-text {
     font-size: 0.7rem;
+  }
+
+  .install-action {
+    min-width: 100%;
+    min-height: 64px;
+    padding: 15px 18px;
+    font-size: 0.94rem;
   }
 }
 
@@ -459,7 +560,10 @@ body::after {
   .hud::after,
   .footer-bar::after,
   .game-stage::after,
-  .message-panel {
+  .message-panel,
+  .app-shell,
+  .install-action {
     animation: none;
+    transition: none;
   }
 }

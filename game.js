@@ -1227,7 +1227,7 @@
     }
 
     queueMove(dx, dy) {
-      if (this.phase !== "playing" || this.moveState || this.pendingDirection) {
+      if (window.__neonInstallLock || this.phase !== "playing" || this.moveState || this.pendingDirection) {
         return;
       }
       this.pendingDirection = { dx, dy };
@@ -1509,6 +1509,10 @@
     }
 
     handleInterludeInput() {
+      if (window.__neonInstallLock) {
+        return;
+      }
+
       if (this.phase === "won") {
         this.startLevel(this.level + 1);
       } else if (this.phase === "lost") {
