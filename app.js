@@ -27,17 +27,17 @@
     installAction.classList.remove("is-hint");
 
     if (deferredInstallPrompt) {
-      installAction.textContent = promptedOnce ? "Install to Play" : "Add to Home Screen to Play";
+      installAction.textContent = promptedOnce ? "Install Slidey to Play" : "Add Slidey to Home Screen to Play";
       return;
     }
 
     if (isIos()) {
-      installAction.textContent = "Share, then tap Add to Home Screen";
+      installAction.textContent = "Share, then tap Add to Home Screen for Slidey";
       installAction.classList.add("is-hint");
       return;
     }
 
-    installAction.textContent = "Install from the Browser Menu to Play";
+    installAction.textContent = "Install Slidey from the Browser Menu to Play";
     installAction.classList.add("is-hint");
   };
 

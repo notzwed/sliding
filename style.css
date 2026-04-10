@@ -81,7 +81,7 @@ body::after {
 }
 
 body.install-locked .app-shell {
-  filter: blur(22px) saturate(0.28);
+  filter: blur(18px) saturate(0.32);
   transform: scale(0.985);
   opacity: 0.68;
   pointer-events: none;
@@ -384,6 +384,55 @@ body.install-locked .app-shell {
   }
 }
 
+@media (pointer: coarse) {
+  body::before {
+    opacity: 0.08;
+    mask-image: none;
+  }
+
+  body::after {
+    inset: 0;
+    opacity: 0.11;
+    filter: none;
+    animation: none;
+  }
+
+  body.install-locked .app-shell {
+    filter: blur(10px) saturate(0.65);
+    transform: none;
+    opacity: 0.54;
+  }
+
+  .hud,
+  .footer-bar,
+  .message-panel,
+  .install-gate {
+    backdrop-filter: none;
+  }
+
+  .hud::after,
+  .footer-bar::after {
+    animation: none;
+    transform: none;
+    opacity: 0.42;
+    background: linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.035) 46%, transparent 72%);
+  }
+
+  .game-stage::after {
+    display: none;
+  }
+
+  .message-panel {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+      0 0 24px rgba(255, 255, 255, 0.08);
+  }
+
+  .install-gate {
+    background: rgba(0, 0, 0, 0.46);
+  }
+}
+
 @media (max-width: 900px), (pointer: coarse) {
   .app-shell {
     gap: 8px;
@@ -450,6 +499,7 @@ body.install-locked .app-shell {
     width: min(92%, 360px);
     padding: 16px 14px;
     border-radius: 16px;
+    backdrop-filter: none;
   }
 
   .install-gate {
@@ -474,7 +524,8 @@ body.install-locked .app-shell {
 
   body::after {
     opacity: 0.14;
-    filter: blur(28px);
+    filter: none;
+    animation: none;
   }
 }
 

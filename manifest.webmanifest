@@ -1,6 +1,6 @@
 {
-  "name": "Neon Collapse Maze",
-  "short_name": "Neon Collapse",
+  "name": "Slidey",
+  "short_name": "Slidey",
   "description": "Slide through the collapsing maze, collect orbs, and escape before the level closes in.",
   "id": "./",
   "start_url": "./",

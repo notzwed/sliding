@@ -1,4 +1,4 @@
-const CACHE_NAME = "neon-collapse-maze-v2";
+const CACHE_NAME = "slidey-v3";
 const CORE_ASSETS = [
   "./",
   "./index.html",
