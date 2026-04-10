@@ -76,6 +76,7 @@
       this.resizeCanvas();
       this.bindEvents();
       this.startLevel(this.level);
+      window.__slideyGame = this;
       window.requestAnimationFrame((timestamp) => this.loop(timestamp));
     }
 
@@ -1502,13 +1503,27 @@
       this.phase = "won";
       this.exitEffect = null;
       this.winOverlayTime = 0;
-      this.runOrbs += this.levelOrbCount;
+      const gainedOrbs = this.levelOrbCount;
+      this.runOrbs += gainedOrbs;
       this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
+      window.dispatchEvent(new CustomEvent("slidey:orbs-earned", {
+        detail: {
+          gained: gainedOrbs,
+          total: this.runOrbs,
+          level: this.level
+        }
+      }));
       this.hideMessage();
       this.setStatusText(
         "You made it through the collapse. The next maze will be denser and more unstable.",
         "Level complete."
       );
+    }
+
+    setWalletOrbs(orbs) {
+      const safe = Math.max(0, Number.isFinite(orbs) ? Math.floor(orbs) : 0);
+      this.runOrbs = safe;
+      this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
     }
 
     handleInterludeInput() {

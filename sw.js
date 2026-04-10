@@ -1,10 +1,11 @@
-const CACHE_NAME = "slidey-v6";
+const CACHE_NAME = "slidey-v7";
 const CORE_ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./game.js",
   "./app.js",
+  "./supabase.config.js",
   "./manifest.webmanifest",
   "./image.png",
   "./icons/favicon-64.png",

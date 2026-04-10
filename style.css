@@ -151,8 +151,8 @@ body.install-locked .app-shell {
 }
 
 .danger-track {
-  width: min(36vw, 240px);
-  height: 9px;
+  width: min(28vw, 170px);
+  height: 6px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.06);
   overflow: hidden;
@@ -349,6 +349,65 @@ body.install-locked .app-shell {
   text-wrap: balance;
 }
 
+.account-bar {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 140px) minmax(0, 140px) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(8, 8, 8, 0.72);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+
+.account-state {
+  min-width: 0;
+  color: var(--soft);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  padding: 0 10px;
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+.account-input::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.account-action {
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.account-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 @keyframes driftGlow {
   0% {
     transform: translate3d(-1.5%, -1%, 0) scale(1);
@@ -473,7 +532,7 @@ body.install-locked .app-shell {
   .danger-track {
     width: 100%;
     min-width: 0;
-    height: 7px;
+    height: 5px;
   }
 
   .footer-bar {
@@ -497,6 +556,15 @@ body.install-locked .app-shell {
     font-size: 0.74rem;
     line-height: 1.24;
     letter-spacing: 0.03em;
+  }
+
+  .account-bar {
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-auto-rows: 34px;
+  }
+
+  .account-state {
+    grid-column: 1 / -1;
   }
 
   .game-stage {
@@ -597,6 +665,11 @@ body.install-locked .app-shell {
   .status-text {
     font-size: 0.68rem;
     line-height: 1.16;
+  }
+
+  .account-bar {
+    gap: 6px;
+    padding: 6px 8px;
   }
 
   .message-panel {
