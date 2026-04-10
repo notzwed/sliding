@@ -40,7 +40,7 @@
   class NeonCollapseMaze {
     constructor() {
       this.canvas = document.getElementById("gameCanvas");
-      this.ctx = this.canvas.getContext("2d");
+      this.ctx = this.canvas.getContext("2d", { desynchronized: true });
       this.levelValue = document.getElementById("levelValue");
       this.orbValue = document.getElementById("orbValue");
       this.runValue = document.getElementById("runValue");
@@ -58,7 +58,9 @@
       this.activePointerId = null;
       this.pendingDirection = null;
       this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+      this.performanceProfile = this.computePerformanceProfile(window.innerWidth, window.innerHeight);
       this.boardMetrics = null;
+      this.backdropCache = null;
       this.camera = { x: 0, y: 0 };
       this.ambientField = [];
       this.introFocusTime = 0;
@@ -163,15 +165,15 @@
       const stage = this.canvas.parentElement;
       const width = stage.clientWidth;
       const height = stage.clientHeight;
-      const coarsePointer = this.isCoarsePointer();
-      const touchCap = Math.min(width, height) < 760 ? 1.35 : 1.6;
-      this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, coarsePointer ? touchCap : 2));
+      this.performanceProfile = this.computePerformanceProfile(width, height);
+      this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, this.performanceProfile.pixelRatioCap));
 
       this.canvas.width = Math.floor(width * this.pixelRatio);
       this.canvas.height = Math.floor(height * this.pixelRatio);
       this.canvas.style.width = `${width}px`;
       this.canvas.style.height = `${height}px`;
       this.ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
+      this.buildBackdropCache(width, height);
 
       if (this.levelData) {
         this.updateBoardMetrics();
@@ -179,7 +181,7 @@
     }
 
     loop(timestamp) {
-      const delta = Math.min((timestamp - this.lastTimestamp) / 1000 || 0, 0.033);
+      const delta = Math.min((timestamp - this.lastTimestamp) / 1000 || 0, this.performanceProfile.maxDelta);
       this.lastTimestamp = timestamp;
       this.lastDelta = delta || this.lastDelta;
 
@@ -1618,32 +1620,67 @@
     }
 
     drawBackdrop(ctx, width, height) {
-      const gradient = ctx.createRadialGradient(width * 0.5, height * 0.42, 20, width * 0.5, height * 0.5, height * 0.92);
-      gradient.addColorStop(0, "rgba(255,255,255,0.035)");
-      gradient.addColorStop(0.55, "rgba(255,255,255,0.015)");
-      gradient.addColorStop(1, "rgba(0,0,0,0)");
-
-      ctx.fillStyle = "#010101";
-      ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
+      if (this.backdropCache) {
+        ctx.drawImage(this.backdropCache, 0, 0, width, height);
+      } else {
+        ctx.fillStyle = "#010101";
+        ctx.fillRect(0, 0, width, height);
+      }
       this.drawAmbientField(ctx, width, height);
+    }
+
+    buildBackdropCache(width, height) {
+      if (!width || !height) {
+        this.backdropCache = null;
+        return;
+      }
+
+      const cache = document.createElement("canvas");
+      cache.width = Math.max(1, Math.floor(width));
+      cache.height = Math.max(1, Math.floor(height));
+      const cacheCtx = cache.getContext("2d");
+
+      if (!cacheCtx) {
+        this.backdropCache = null;
+        return;
+      }
+
+      cacheCtx.fillStyle = "#010101";
+      cacheCtx.fillRect(0, 0, cache.width, cache.height);
+
+      if (!this.performanceProfile.reducedEffects) {
+        const gradient = cacheCtx.createRadialGradient(
+          cache.width * 0.5,
+          cache.height * 0.42,
+          20,
+          cache.width * 0.5,
+          cache.height * 0.5,
+          cache.height * 0.92
+        );
+        gradient.addColorStop(0, "rgba(255,255,255,0.035)");
+        gradient.addColorStop(0.55, "rgba(255,255,255,0.015)");
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+        cacheCtx.fillStyle = gradient;
+        cacheCtx.fillRect(0, 0, cache.width, cache.height);
+      }
+
+      this.backdropCache = cache;
     }
 
     buildAmbientField(seed) {
       const rng = new RNG(seed ^ 0xa53c9e17);
-      const coarse = this.isCoarsePointer();
-      const count = coarse ? 10 : 14;
+      const coarse = this.performanceProfile.reducedEffects;
+      const count = this.performanceProfile.ambientParticleCount;
       const field = [];
 
       for (let i = 0; i < count; i += 1) {
         field.push({
           x: rng.next(),
           y: rng.next(),
-          length: 10 + rng.next() * (coarse ? 12 : 18),
-          drift: 6 + rng.next() * 12,
-          speed: 0.14 + rng.next() * 0.26,
-          alpha: 0.018 + rng.next() * 0.028,
+          length: 10 + rng.next() * (coarse ? 8 : 18),
+          drift: 5 + rng.next() * (coarse ? 8 : 12),
+          speed: 0.14 + rng.next() * (coarse ? 0.18 : 0.26),
+          alpha: 0.012 + rng.next() * (coarse ? 0.016 : 0.028),
           phase: rng.next() * Math.PI * 2,
           depth: 0.25 + rng.next() * 0.9,
           angle: -0.55 + (rng.next() - 0.5) * 0.22,
@@ -1763,6 +1800,7 @@
     drawOrbs(ctx) {
       const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
       const pulse = 0.78 + Math.sin(this.levelTime * 3.6) * 0.08;
+      const reducedEffects = this.performanceProfile.reducedEffects;
 
       ctx.save();
       ctx.beginPath();
@@ -1780,8 +1818,10 @@
         const radius = Math.max(1.9, cellSize * 0.12);
 
         ctx.save();
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = "rgba(255,255,255,1)";
+        if (!reducedEffects) {
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = "rgba(255,255,255,1)";
+        }
         ctx.fillStyle = `rgba(255,255,255,${pulse})`;
         ctx.beginPath();
         ctx.arc(cx, cy, radius, 0, Math.PI * 2);
@@ -1797,6 +1837,7 @@
       const enterBoost = this.exitEffect ? this.easeInOutSine(this.exitEffect.time / this.exitEffect.duration) : 0;
       const pulse = 0.82 + Math.sin(this.levelTime * (3.4 + enterBoost * 5)) * 0.08 + enterBoost * 0.18;
       const shimmer = (this.levelTime * (0.95 + enterBoost * 1.6)) % 1;
+      const reducedEffects = this.performanceProfile.reducedEffects;
 
       if (this.isCollapsed(this.levelData.exit.x, this.levelData.exit.y)) {
         return;
@@ -1820,22 +1861,26 @@
       const aura = 0.18 + pulse * 0.1 + enterBoost * 0.12;
 
       ctx.save();
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = "rgba(255,255,255,0.95)";
+      if (!reducedEffects) {
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = "rgba(255,255,255,0.95)";
+      }
       ctx.strokeStyle = `rgba(255,255,255,${0.86 + pulse * 0.08})`;
       ctx.lineWidth = Math.max(2, cellSize * 0.075);
       ctx.strokeRect(x + outerInset, y + outerInset, frameWidth, frameHeight);
       ctx.restore();
 
       ctx.save();
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = "rgba(255,255,255,0.42)";
+      if (!reducedEffects) {
+        ctx.shadowBlur = 14;
+        ctx.shadowColor = "rgba(255,255,255,0.42)";
+      }
       ctx.strokeStyle = `rgba(255,255,255,${0.34 + pulse * 0.12})`;
       ctx.lineWidth = Math.max(1, cellSize * 0.045);
       ctx.strokeRect(x + innerInset, y + innerInset, coreWidth, coreHeight);
       ctx.restore();
 
-      if (enterBoost > 0) {
+      if (enterBoost > 0 && !reducedEffects) {
         ctx.save();
         ctx.shadowBlur = 18;
         ctx.shadowColor = "rgba(255,255,255,0.72)";
@@ -1898,6 +1943,7 @@
       const centerX = position.x + cellSize / 2;
       const centerY = position.y + cellSize / 2;
       const size = cellSize * 0.48;
+      const reducedEffects = this.performanceProfile.reducedEffects;
 
       if (this.deathEffect) {
         this.drawPlayerDeath(ctx, centerX, centerY, size, frameX, frameY, viewportWidth, viewportHeight, cellSize);
@@ -1955,7 +2001,7 @@
       const px = centerX - width / 2 + offsetX;
       const py = centerY - height / 2 + offsetY;
 
-      if (this.moveState && !this.exitEffect) {
+      if (this.moveState && !this.exitEffect && !reducedEffects) {
         const trail = this.smoothPulse(this.moveState.progress) * cellSize * 0.12;
         const trailWidth = width + Math.abs(this.moveState.dx) * trail;
         const trailHeight = height + Math.abs(this.moveState.dy) * trail;
@@ -1973,7 +2019,7 @@
         ctx.restore();
       }
 
-      if (this.exitEffect) {
+      if (this.exitEffect && !reducedEffects) {
         const enter = this.easeInOutSine(this.exitEffect.time / this.exitEffect.duration);
         const wellRadius = cellSize * (0.2 + enter * 0.34);
         const well = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, wellRadius);
@@ -1993,8 +2039,10 @@
       ctx.beginPath();
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
-      ctx.shadowBlur = 12;
-      ctx.shadowColor = "rgba(255,255,255,1)";
+      if (!reducedEffects) {
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = "rgba(255,255,255,1)";
+      }
       ctx.fillStyle = `rgba(255,255,255,${pulse})`;
       ctx.fillRect(px, py, width, height);
       ctx.restore();
@@ -2008,25 +2056,30 @@
       const coreSize = Math.max(cellSize * 0.045, size * coreScale);
       const ringRadius = cellSize * (0.08 + progress * 0.44);
       const wellRadius = cellSize * (0.16 + progress * 0.38);
+      const reducedEffects = this.performanceProfile.reducedEffects;
 
       ctx.save();
       ctx.beginPath();
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
 
-      const well = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, wellRadius);
-      well.addColorStop(0, `rgba(0,0,0,${0.22 + progress * 0.44})`);
-      well.addColorStop(0.68, `rgba(0,0,0,${0.08 + progress * 0.18})`);
-      well.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = well;
-      ctx.fillRect(centerX - wellRadius, centerY - wellRadius, wellRadius * 2, wellRadius * 2);
+      if (!reducedEffects) {
+        const well = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, wellRadius);
+        well.addColorStop(0, `rgba(0,0,0,${0.22 + progress * 0.44})`);
+        well.addColorStop(0.68, `rgba(0,0,0,${0.08 + progress * 0.18})`);
+        well.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = well;
+        ctx.fillRect(centerX - wellRadius, centerY - wellRadius, wellRadius * 2, wellRadius * 2);
+      }
 
       if (progress < 0.88) {
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.rotate(progress * 0.36);
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = `rgba(255,255,255,${0.24 + flash * 0.3})`;
+        if (!reducedEffects) {
+          ctx.shadowBlur = 12;
+          ctx.shadowColor = `rgba(255,255,255,${0.24 + flash * 0.3})`;
+        }
         ctx.fillStyle = `rgba(255,255,255,${0.28 + flash * 0.62})`;
         ctx.fillRect(-coreSize / 2, -coreSize / 2, coreSize, coreSize);
         ctx.restore();
@@ -2065,6 +2118,10 @@
     }
 
     drawFocusMask(ctx) {
+      if (this.performanceProfile.reducedEffects) {
+        return;
+      }
+
       const { frameX, frameY, viewportWidth, viewportHeight, cellSize } = this.boardMetrics;
       const playerPos = this.toScreen(this.player.renderX, this.player.renderY);
       const centerX = playerPos.x + cellSize / 2;
@@ -2112,13 +2169,18 @@
 
       ctx.translate(0, translateY);
       ctx.globalAlpha = 0.2 + progress * 0.8;
-      ctx.save();
-      ctx.shadowBlur = 28;
-      ctx.shadowColor = "rgba(255,255,255,0.16)";
       ctx.fillStyle = "rgba(8,8,8,0.76)";
-      this.roundRect(ctx, cardX, cardY, cardWidth, cardHeight, 22);
-      ctx.fill();
-      ctx.restore();
+      if (!this.performanceProfile.reducedEffects) {
+        ctx.save();
+        ctx.shadowBlur = 28;
+        ctx.shadowColor = "rgba(255,255,255,0.16)";
+        this.roundRect(ctx, cardX, cardY, cardWidth, cardHeight, 22);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        this.roundRect(ctx, cardX, cardY, cardWidth, cardHeight, 22);
+        ctx.fill();
+      }
 
       ctx.strokeStyle = `rgba(255,255,255,${0.18 + progress * 0.18})`;
       ctx.lineWidth = 1;
@@ -2349,8 +2411,10 @@
       ctx.clip();
       ctx.strokeStyle = `rgba(255,255,255,${0.12 + burst * 0.16})`;
       ctx.lineWidth = Math.max(1, cellSize * 0.05);
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = "rgba(255,255,255,0.45)";
+      if (!this.performanceProfile.reducedEffects) {
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = "rgba(255,255,255,0.45)";
+      }
       ctx.beginPath();
       if (this.impactEffect.dx !== 0) {
         ctx.moveTo(centerX, centerY - span);
@@ -2484,7 +2548,8 @@
     }
 
     getSlideDuration(distance) {
-      return BASE_CONFIG.slideBaseDuration + distance * BASE_CONFIG.slideCellDuration;
+      const duration = BASE_CONFIG.slideBaseDuration + distance * BASE_CONFIG.slideCellDuration;
+      return duration * this.performanceProfile.slideDurationScale;
     }
 
     segmentKey(fromKey, toKey, dx, dy) {
@@ -2513,6 +2578,22 @@
 
     isCoarsePointer() {
       return Boolean(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    }
+
+    computePerformanceProfile(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
+      const coarsePointer = this.isCoarsePointer();
+      const shortEdge = Math.max(1, Math.min(viewportWidth || 0, viewportHeight || 0));
+      const ultraCompact = coarsePointer && shortEdge < 520;
+      const compactTouch = coarsePointer && shortEdge < 760;
+      const reducedEffects = coarsePointer || shortEdge < 760;
+
+      return {
+        reducedEffects,
+        pixelRatioCap: coarsePointer ? (ultraCompact ? 1 : compactTouch ? 1.05 : 1.2) : 2,
+        maxDelta: coarsePointer ? (ultraCompact ? 0.085 : 0.075) : 0.05,
+        slideDurationScale: coarsePointer ? (ultraCompact ? 0.68 : compactTouch ? 0.74 : 0.82) : 1,
+        ambientParticleCount: coarsePointer ? (ultraCompact ? 0 : compactTouch ? 2 : 4) : 14,
+      };
     }
 
     isCompactViewport() {
