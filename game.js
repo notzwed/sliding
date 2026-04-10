@@ -2651,21 +2651,21 @@
     computePerformanceProfile(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
       const coarsePointer = this.isCoarsePointer();
       const shortEdge = Math.max(1, Math.min(viewportWidth || 0, viewportHeight || 0));
-      const ultraCompact = coarsePointer && shortEdge < 520;
-      const reducedEffects = ultraCompact;
+      const ultraCompact = coarsePointer && shortEdge < 420;
+      const reducedEffects = ultraCompact && shortEdge < 380;
 
       return {
         isTouch: coarsePointer,
         isPhone: ultraCompact,
         reducedEffects,
-        dynamicFocusMask: !ultraCompact,
-        glowStrength: coarsePointer ? (ultraCompact ? 0.58 : 0.82) : 1,
-        trailStrength: coarsePointer ? (ultraCompact ? 0 : 0.72) : 1,
-        backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.7 : 0.9) : 1,
-        pixelRatioCap: coarsePointer ? (ultraCompact ? 1.12 : 1.32) : 2,
-        maxDelta: coarsePointer ? 0.12 : 0.05,
-        slideDurationScale: coarsePointer ? (ultraCompact ? 0.72 : 0.86) : 1,
-        ambientParticleCount: coarsePointer ? (ultraCompact ? 2 : 7) : 14,
+        dynamicFocusMask: !reducedEffects,
+        glowStrength: coarsePointer ? (ultraCompact ? 0.78 : 0.95) : 1,
+        trailStrength: coarsePointer ? (ultraCompact ? 0.35 : 0.85) : 1,
+        backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.82 : 0.95) : 1,
+        pixelRatioCap: coarsePointer ? (ultraCompact ? 1.75 : 2) : 2.5,
+        maxDelta: coarsePointer ? 0.09 : 0.05,
+        slideDurationScale: coarsePointer ? (ultraCompact ? 0.82 : 0.92) : 1,
+        ambientParticleCount: coarsePointer ? (ultraCompact ? 6 : 10) : 14,
       };
     }
 
