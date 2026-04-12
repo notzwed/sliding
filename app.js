@@ -78,6 +78,9 @@
   let appUpdateReady = false;
   let latestRemoteCommitSha = "";
   let swControllerReloaded = false;
+  let updateApplyInProgress = false;
+  let updateCheckIntervalId = null;
+  let lastUpdateCheckAt = 0;
 
   const isIos = () => /iPad|iPhone|iPod/.test(window.navigator.userAgent) ||
     (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
@@ -136,16 +139,65 @@
 
   const getSeenRemoteCommit = () => window.localStorage.getItem(LAST_REMOTE_COMMIT_KEY) || "";
 
-  const applyPendingUpdate = () => {
+  const getNeedsCommitRefresh = () => {
+    const seen = getSeenRemoteCommit();
+    return Boolean(latestRemoteCommitSha && seen && latestRemoteCommitSha !== seen);
+  };
+
+  const requestServiceWorkerUpdate = async () => {
+    if (!swRegistration) {
+      return false;
+    }
+    try {
+      await swRegistration.update();
+    } catch (_error) {
+      return false;
+    }
+    if (swRegistration.waiting) {
+      handleUpdateReady();
+      return true;
+    }
+    return false;
+  };
+
+  const applyPendingUpdate = async () => {
     if (!swRegistration) {
       return;
     }
+    if (updateApplyInProgress) {
+      return;
+    }
+    updateApplyInProgress = true;
+    showAppUpdateButton("Updating...");
     const waiting = swRegistration.waiting;
     if (waiting) {
       waiting.postMessage({ type: "SKIP_WAITING" });
+      window.setTimeout(() => {
+        updateApplyInProgress = false;
+      }, 4000);
       return;
     }
-    void swRegistration.update();
+    const hasWaitingAfterUpdate = await requestServiceWorkerUpdate();
+    if (hasWaitingAfterUpdate) {
+      swRegistration.waiting?.postMessage({ type: "SKIP_WAITING" });
+      window.setTimeout(() => {
+        updateApplyInProgress = false;
+      }, 4000);
+      return;
+    }
+    if (isStandalone() && getNeedsCommitRefresh()) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("refresh", String(Date.now()));
+      window.location.replace(url.toString());
+      return;
+    }
+    showAppUpdateButton("No Update Yet");
+    window.setTimeout(() => {
+      if (!appUpdateReady) {
+        hideAppUpdateButton();
+      }
+    }, 1600);
+    updateApplyInProgress = false;
   };
 
   const handleUpdateReady = () => {
@@ -153,7 +205,7 @@
     showAppUpdateButton("Update Ready");
     if (isStandalone()) {
       window.setTimeout(() => {
-        applyPendingUpdate();
+        void applyPendingUpdate();
       }, 250);
     }
   };
@@ -197,19 +249,33 @@
       const seen = getSeenRemoteCommit();
       if (!seen) {
         markRemoteCommitSeen(sha);
-        return;
+        return false;
       }
       if (sha !== seen) {
         showAppUpdateButton("Update Ready");
-        if (swRegistration) {
-          await swRegistration.update();
-          if (swRegistration.waiting) {
-            handleUpdateReady();
-          }
+        await requestServiceWorkerUpdate();
+        if (swRegistration?.waiting) {
+          handleUpdateReady();
         }
+        return true;
       }
+      return false;
     } catch (_error) {
+      return false;
     }
+  };
+
+  const checkForAppUpdates = async ({ force = false } = {}) => {
+    if (!("serviceWorker" in navigator)) {
+      return;
+    }
+    const now = Date.now();
+    if (!force && now - lastUpdateCheckAt < 15000) {
+      return;
+    }
+    lastUpdateCheckAt = now;
+    await requestServiceWorkerUpdate();
+    await checkForRemoteCommitUpdate();
   };
 
   const readNumber = (value, fallback) => {
@@ -1386,7 +1452,7 @@
   }
 
   appUpdateBtn?.addEventListener("click", () => {
-    applyPendingUpdate();
+    void applyPendingUpdate();
   });
 
   if ("serviceWorker" in navigator) {
@@ -1395,22 +1461,38 @@
       () => {
         navigator.serviceWorker.register("./sw.js").then((registration) => {
           monitorServiceWorkerRegistration(registration);
-          void registration.update();
-          void checkForRemoteCommitUpdate();
-          window.setInterval(() => {
-            void checkForRemoteCommitUpdate();
-          }, 90000);
+          void checkForAppUpdates({ force: true });
+          updateCheckIntervalId = window.setInterval(() => {
+            void checkForAppUpdates();
+          }, 60000);
         }).catch(() => {
         });
       },
       { once: true }
     );
 
+    const triggerForegroundUpdateCheck = () => {
+      void checkForAppUpdates({ force: true });
+    };
+    window.addEventListener("online", triggerForegroundUpdateCheck);
+    window.addEventListener("focus", triggerForegroundUpdateCheck);
+    window.addEventListener("pageshow", triggerForegroundUpdateCheck);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        triggerForegroundUpdateCheck();
+      }
+    });
+
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (swControllerReloaded) {
         return;
       }
       swControllerReloaded = true;
+      updateApplyInProgress = false;
+      if (updateCheckIntervalId) {
+        window.clearInterval(updateCheckIntervalId);
+        updateCheckIntervalId = null;
+      }
       if (latestRemoteCommitSha) {
         markRemoteCommitSeen(latestRemoteCommitSha);
       }
