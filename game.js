@@ -53,6 +53,11 @@
       this.messagePanel = document.getElementById("messagePanel");
       this.messageTitle = document.getElementById("messageTitle");
       this.messageText = document.getElementById("messageText");
+      this.tutorialBlur = document.getElementById("tutorialBlur");
+      this.tutorialDialog = document.getElementById("tutorialDialog");
+      this.tutorialAvatar = document.getElementById("tutorialAvatar");
+      this.tutorialDialogText = document.getElementById("tutorialDialogText");
+      this.tutorialDialogNext = document.getElementById("tutorialDialogNext");
       this.interludeActions = document.getElementById("interludeActions");
       this.replayRunBtn = document.getElementById("replayRunBtn");
       this.continueRunBtn = document.getElementById("continueRunBtn");
@@ -80,6 +85,12 @@
       this.triangleSpinTime = 0;
       this.isMenuDemo = false;
       this.isTutorialRun = false;
+      this.isChallengeRun = false;
+      this.challengeCode = "";
+      this.challengeSeed = 0;
+      this.tutorialStage = 0;
+      this.tutorialFlow = null;
+      this.ghostState = null;
       this.tutorialStep = 0;
       this.demoStepCooldown = 0;
       this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
@@ -158,7 +169,17 @@
     }
 
     startTutorialRun() {
-      this.startLevel(1, { tutorial: true });
+      this.startLevel(1, { tutorial: true, tutorialStage: 0 });
+    }
+
+    startTutorialStage(stage) {
+      this.startLevel(1, { tutorial: true, tutorialStage: stage });
+    }
+
+    startChallengeRun(level = this.unlockedLevel, challenge = {}) {
+      const seed = Number.isFinite(challenge.seed) ? (challenge.seed >>> 0) : ((Date.now() ^ Math.floor(Math.random() * 2147483647)) >>> 0);
+      const code = typeof challenge.code === "string" ? challenge.code : "";
+      this.startLevel(level, { challenge: true, challengeSeed: seed, challengeCode: code });
     }
 
     enterMenuDemo() {
@@ -223,9 +244,17 @@
       });
 
       this.messagePanel.addEventListener("pointerup", () => {
+        if (this.isTutorialRun && this.phase === "playing" && this.tutorialFlow) {
+          this.advanceTutorialDialog();
+          return;
+        }
         if (this.phase !== "playing") {
           this.handleInterludeInput();
         }
+      });
+
+      this.tutorialDialogNext?.addEventListener("click", () => {
+        this.advanceTutorialDialog();
       });
 
       this.replayRunBtn?.addEventListener("click", () => {
@@ -297,13 +326,23 @@
     startLevel(level, options = {}) {
       const tutorial = Boolean(options.tutorial);
       const menuDemo = Boolean(options.menuDemo);
+      const challenge = Boolean(options.challenge);
+      const tutorialStage = Number.isFinite(options.tutorialStage) ? Math.max(0, Math.floor(options.tutorialStage)) : 0;
+      const challengeSeed = Number.isFinite(options.challengeSeed) ? (options.challengeSeed >>> 0) : 0;
+      const challengeCode = typeof options.challengeCode === "string" ? options.challengeCode : "";
       this.phase = "playing";
       this.level = Math.max(1, Math.min(level, BASE_CONFIG.maxLevel));
       this.isTutorialRun = tutorial;
+      this.isChallengeRun = challenge;
+      this.challengeSeed = challenge ? challengeSeed : 0;
+      this.challengeCode = challenge ? challengeCode : "";
+      this.tutorialStage = tutorial ? tutorialStage : 0;
       this.isMenuDemo = menuDemo;
       this.tutorialStep = 0;
       this.demoStepCooldown = 0;
-      this.levelData = tutorial ? this.buildTutorialLevel() : this.buildLevel(this.level);
+      this.levelData = tutorial
+        ? this.buildTutorialLevel(this.tutorialStage)
+        : (challenge ? this.buildLevelFromSeed(this.level, this.challengeSeed || 1) : this.buildLevel(this.level));
       this.player = {
         x: this.levelData.start.x,
         y: this.levelData.start.y,
@@ -327,6 +366,10 @@
       this.orbMultiplierRemaining = 0;
       this.orbMultiplierValue = 1;
       this.freezeWaveOrigin = null;
+      this.tutorialFlow = null;
+      if (!challenge) {
+        this.ghostState = null;
+      }
       this.ambientField = this.buildAmbientField(this.levelData.seed);
       this.hideMessage();
       this.hideInterludeActions();
@@ -334,19 +377,47 @@
       this.updateBoardMetrics();
       this.resetCamera();
       if (tutorial) {
-        this.setStatusText(
-          "Tutorial 1/3: fai uno swipe. Il cubo scivola finché non trova un muro dove fermarsi.",
-          "1/3 fai uno swipe e fermati su un muro."
-        );
+        this.setStatusText("", "");
+        this.startTutorialFlowForStage(this.tutorialStage);
       } else if (menuDemo) {
+        this.hideTutorialDialog();
         this.setStatusText(
           "Attract mode running in background.",
           "Background demo."
         );
       } else {
-        this.setStatusText("", "");
+        this.hideTutorialDialog();
+        if (challenge) {
+          this.setStatusText(
+            "Challenge mode attiva: stessa mappa per entrambi, effetti indipendenti.",
+            "Challenge attiva."
+          );
+        } else {
+          this.setStatusText("", "");
+        }
       }
       this.updateHud();
+    }
+
+    buildLevelFromSeed(level, seedBase) {
+      const base = seedBase >>> 0;
+      for (let attempt = 0; attempt < 768; attempt += 1) {
+        const seed = (base ^ Math.imul(attempt + 1, 2654435761)) >>> 0;
+        const candidate = this.generateLevelCandidate(level, seed);
+        if (candidate) {
+          return candidate;
+        }
+      }
+
+      for (let attempt = 768; attempt < 1024; attempt += 1) {
+        const seed = (base ^ 0x9e3779b9 ^ Math.imul(attempt + 1, 2246822519)) >>> 0;
+        const candidate = this.generateLevelCandidate(level, seed, true);
+        if (candidate) {
+          return candidate;
+        }
+      }
+
+      return this.buildLevel(level);
     }
 
     buildLevel(level) {
@@ -373,37 +444,72 @@
       throw new Error("Unable to generate a solvable slide maze.");
     }
 
-    buildTutorialLevel() {
+    buildTutorialLevel(stage = 0) {
       const rows = 11;
       const cols = 11;
       const grid = Array.from({ length: rows }, () => Array(cols).fill("wall"));
-      const floorCells = [
-        [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
-        [3, 8], [3, 7], [3, 6], [3, 5], [3, 4], [3, 3],
-        [4, 3], [5, 3], [6, 3], [7, 3], [8, 3], [9, 3],
-        [9, 2], [9, 1], [9, 4], [9, 5], [9, 6], [9, 7], [9, 8],
-        [4, 7], [5, 7], [6, 7], [7, 7], [8, 7]
+      const layouts = [
+        {
+          floorCells: [
+            [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
+            [3, 8], [3, 7], [3, 6], [3, 5], [3, 4], [3, 3],
+            [4, 3], [5, 3], [6, 3], [7, 3], [8, 3], [9, 3],
+            [9, 2], [9, 1], [9, 4], [9, 5], [9, 6], [9, 7], [9, 8]
+          ],
+          start: { x: 1, y: 9 },
+          exit: { x: 9, y: 1 },
+          orbs: [
+            { x: 5, y: 9, type: "normal" },
+            { x: 7, y: 3, type: "normal" }
+          ]
+        },
+        {
+          floorCells: [
+            [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
+            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3], [9, 2], [9, 1]
+          ],
+          start: { x: 1, y: 9 },
+          exit: { x: 9, y: 3 },
+          orbs: [
+            { x: 9, y: 7, type: "freeze" },
+            { x: 9, y: 5, type: "normal" }
+          ]
+        },
+        {
+          floorCells: [
+            [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
+            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3], [9, 2], [9, 1]
+          ],
+          start: { x: 1, y: 9 },
+          exit: { x: 9, y: 1 },
+          orbs: [
+            { x: 9, y: 8, type: "multiplier" },
+            { x: 9, y: 6, type: "normal" },
+            { x: 9, y: 5, type: "normal" }
+          ]
+        }
       ];
+      const config = layouts[this.clamp(stage, 0, layouts.length - 1)];
 
-      for (const [x, y] of floorCells) {
+      for (const [x, y] of config.floorCells) {
         grid[y][x] = "floor";
       }
 
-      const start = { x: 1, y: 9 };
-      const exit = { x: 9, y: 1 };
+      const start = { ...config.start };
+      const exit = { ...config.exit };
       const orbCells = new Map();
-      orbCells.set(this.cellKey(5, 9), { x: 5, y: 9, type: "normal", collected: false });
-      orbCells.set(this.cellKey(3, 6), { x: 3, y: 6, type: "normal", collected: false });
-      orbCells.set(this.cellKey(7, 3), { x: 7, y: 3, type: "normal", collected: false });
+      for (const orb of config.orbs) {
+        orbCells.set(this.cellKey(orb.x, orb.y), { x: orb.x, y: orb.y, type: orb.type, collected: false });
+      }
 
       const collapseAt = Array.from({ length: rows }, () => Array(cols).fill(Number.POSITIVE_INFINITY));
-      for (const [x, y] of floorCells) {
+      for (const [x, y] of config.floorCells) {
         collapseAt[y][x] = 120;
       }
       collapseAt[start.y][start.x] = 120;
       collapseAt[exit.y][exit.x] = 120;
 
-      const mainPathSet = new Set(floorCells.map(([x, y]) => this.cellKey(x, y)));
+      const mainPathSet = new Set(config.floorCells.map(([x, y]) => this.cellKey(x, y)));
       const slideGraph = { edges: new Map() };
       const slideAnalysis = {
         strongNodes: new Set(mainPathSet),
@@ -427,6 +533,106 @@
         dynamicWallMap: new Map(),
         maxCollapseTime: 120
       };
+    }
+
+    getTutorialScript(stage) {
+      const scripts = [
+        [
+          { text: "Hi, I am Slidey. Tap Next to continue." },
+          { text: "Core mechanic: swipe once and slide until a wall stops you.", waitFor: "move" },
+          { text: "Good. Now collect one white orb.", waitFor: "collect_normal" },
+          { text: "Nice. Reach the gate to finish tutorial stage one.", waitFor: "complete_stage" }
+        ],
+        [
+          { text: "Tutorial 2: this route teaches the red orb." },
+          { text: "Collect the red orb: collapse freezes for 4 seconds.", waitFor: "collect_freeze" },
+          { text: "Use that window and close the gate.", waitFor: "complete_stage" }
+        ],
+        [
+          { text: "Tutorial 3: yellow orb gives time bonus and orb multiplier." },
+          { text: "Collect the yellow orb.", waitFor: "collect_multiplier" },
+          { text: "Now collect at least one normal orb while the boost is active.", waitFor: "collect_while_multiplier" },
+          { text: "Close the gate to finish tutorial and claim 20 bonus orbs.", waitFor: "complete_stage" }
+        ]
+      ];
+      return scripts[this.clamp(stage, 0, scripts.length - 1)];
+    }
+
+    startTutorialFlowForStage(stage) {
+      const script = this.getTutorialScript(stage);
+      this.tutorialFlow = {
+        stage,
+        script,
+        index: 0,
+        waitingFor: null,
+        multiplierCollectedNormal: false
+      };
+      this.showTutorialDialogStep();
+    }
+
+    updateTutorialAvatar() {
+      if (!this.tutorialAvatar) {
+        return;
+      }
+      this.tutorialAvatar.className = "tutorial-avatar";
+      if (this.playerShape === "circle") {
+        this.tutorialAvatar.classList.add("tutorial-avatar-circle");
+      } else if (this.playerShape === "triangle") {
+        this.tutorialAvatar.classList.add("tutorial-avatar-triangle");
+      } else {
+        this.tutorialAvatar.classList.add("tutorial-avatar-square");
+      }
+    }
+
+    showTutorialDialogStep() {
+      if (!this.tutorialFlow || !this.tutorialDialog || !this.tutorialDialogText) {
+        return;
+      }
+      const step = this.tutorialFlow.script[this.tutorialFlow.index];
+      if (!step) {
+        this.hideTutorialDialog();
+        return;
+      }
+      this.updateTutorialAvatar();
+      this.tutorialDialogText.textContent = step.text;
+      this.tutorialBlur?.classList.remove("hidden");
+      this.tutorialDialog.classList.remove("hidden");
+      this.canvas.parentElement?.classList.add("tutorial-focus");
+    }
+
+    hideTutorialDialog() {
+      this.tutorialBlur?.classList.add("hidden");
+      this.tutorialDialog?.classList.add("hidden");
+      this.canvas.parentElement?.classList.remove("tutorial-focus");
+    }
+
+    advanceTutorialDialog() {
+      if (!this.tutorialFlow) {
+        return;
+      }
+      const step = this.tutorialFlow.script[this.tutorialFlow.index];
+      if (!step) {
+        return;
+      }
+      if (step.waitFor) {
+        this.tutorialFlow.waitingFor = step.waitFor;
+        this.hideTutorialDialog();
+        return;
+      }
+      this.tutorialFlow.index += 1;
+      this.showTutorialDialogStep();
+    }
+
+    satisfyTutorialWait(condition) {
+      if (!this.tutorialFlow || !this.tutorialFlow.waitingFor) {
+        return;
+      }
+      if (this.tutorialFlow.waitingFor !== condition) {
+        return;
+      }
+      this.tutorialFlow.waitingFor = null;
+      this.tutorialFlow.index += 1;
+      this.showTutorialDialogStep();
     }
 
     generateLevelCandidate(level, seed, softMode = false) {
@@ -1228,10 +1434,11 @@
     }
 
     getTargetOrbCount(reversibleCellCount, level) {
+      const progressiveDensity = 0.132 + level * 0.0042;
       return this.clamp(
-        Math.floor(reversibleCellCount * (0.118 + level * 0.0028)),
-        10,
-        30
+        Math.floor(reversibleCellCount * progressiveDensity),
+        12,
+        72
       );
     }
 
@@ -1604,6 +1811,7 @@
         return;
       }
 
+      this.hideInterludeActions();
       this.tickRunClock(delta);
       this.tickCollapseClock(delta);
       this.tickOrbEffects(delta);
@@ -1630,6 +1838,7 @@
     }
 
     updateMenuDemo(delta) {
+      this.hideInterludeActions();
       if (this.phase === "won" || this.phase === "lost") {
         this.demoStepCooldown -= delta;
         if (this.demoStepCooldown <= 0) {
@@ -1668,12 +1877,16 @@
       }
 
       if (this.player.x === this.levelData.exit.x && this.player.y === this.levelData.exit.y) {
-        if (this.isTutorialRun && this.levelOrbCount < 1) {
-          this.setStatusText(
-            "Prima di uscire, raccogli almeno una orb per capire la meccanica base.",
-            "Prendi 1 orb prima dell'uscita."
-          );
-          return;
+        if (this.isTutorialRun) {
+          const waiting = this.tutorialFlow?.waitingFor || null;
+          if (waiting && waiting !== "complete_stage") {
+            this.setStatusText(
+              "Complete the current tutorial step before closing the gate.",
+              "Complete the step before the gate."
+            );
+            return;
+          }
+          this.satisfyTutorialWait("complete_stage");
         }
         this.beginExitSequence();
         return;
@@ -1723,10 +1936,7 @@
 
       if (this.isTutorialRun && this.tutorialStep === 0) {
         this.tutorialStep = 1;
-        this.setStatusText(
-          "Tutorial 2/3: perfetto. Adesso raccogli una orb luminosa.",
-          "2/3 prendi una orb."
-        );
+        this.satisfyTutorialWait("move");
       }
 
       const from = path[0];
@@ -1818,26 +2028,25 @@
       if (orbType === "multiplier") {
         this.orbMultiplierRemaining = Math.max(this.orbMultiplierRemaining, 8);
         this.orbMultiplierValue = 2;
+        this.satisfyTutorialWait("collect_multiplier");
       } else if (orbType === "freeze") {
         this.collapseFreezeRemaining = Math.max(this.collapseFreezeRemaining, 4);
         this.freezeWaveOrigin = { x: orb.x, y: orb.y };
+        this.satisfyTutorialWait("collect_freeze");
+      } else {
+        this.satisfyTutorialWait("collect_normal");
+        if (this.orbMultiplierRemaining > 0) {
+          this.satisfyTutorialWait("collect_while_multiplier");
+        }
       }
 
+      const timeBonusSec = this.orbMultiplierValue > 1 ? 1 : 0.5;
+      this.runClockTime = Math.max(0, this.runClockTime - timeBonusSec);
+      this.levelTime = Math.max(0, this.levelTime - timeBonusSec);
+      this.currentRunTimeMs = Math.floor(this.runClockTime * 1000);
+
       this.levelOrbCount += gained;
-      if (this.isTutorialRun) {
-        if (this.levelOrbCount === 1) {
-          this.tutorialStep = Math.max(this.tutorialStep, 2);
-          this.setStatusText(
-            "Tutorial 3/3: ottimo. Ora raggiungi l'uscita per completare il tutorial.",
-            "3/3 vai all'uscita."
-          );
-        } else {
-          this.setStatusText(
-            "Ottimo controllo. Prova a leggere la traiettoria prima di ogni swipe.",
-            "Buono: leggi la traiettoria."
-          );
-        }
-      } else {
+      if (!this.isTutorialRun) {
         if (orbType === "multiplier") {
           this.setStatusText(
             "Yellow orb: x2 orbs active for 8 seconds.",
@@ -2058,23 +2267,25 @@
         }
       }
 
-      const gainedOrbs = this.levelOrbCount;
-      this.runOrbs += gainedOrbs;
-      this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
-      window.dispatchEvent(new CustomEvent("slidey:orbs-earned", {
-        detail: {
-          gained: gainedOrbs,
-          total: this.runOrbs,
-          level: this.level,
-          unlockedLevel: this.level + 1
-        }
-      }));
+      if (!this.isTutorialRun) {
+        const gainedOrbs = this.levelOrbCount;
+        this.runOrbs += gainedOrbs;
+        this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
+        window.dispatchEvent(new CustomEvent("slidey:orbs-earned", {
+          detail: {
+            gained: gainedOrbs,
+            total: this.runOrbs,
+            level: this.level,
+            unlockedLevel: this.level + 1
+          }
+        }));
+      }
       this.hideMessage();
       this.showInterludeActions("won");
       if (this.isTutorialRun) {
         this.setStatusText(
-          "Tutorial completato: ora puoi iniziare una run normale dal menu Start.",
-          "Tutorial completato."
+          "Tutorial complete: you can now start a normal run from the Start menu.",
+          "Tutorial complete."
         );
       } else {
         this.setStatusText(
@@ -2107,9 +2318,25 @@
 
       if (this.phase === "won") {
         if (this.isTutorialRun) {
-          this.startLevel(this.unlockedLevel);
+          if (this.tutorialStage < 2) {
+            this.startTutorialStage(this.tutorialStage + 1);
+          } else {
+            this.enterMenuDemo();
+            window.dispatchEvent(new CustomEvent("slidey:tutorial-complete", {
+              detail: { reward: 20 }
+            }));
+            window.dispatchEvent(new CustomEvent("slidey:return-to-main"));
+          }
+        } else if (this.isChallengeRun) {
+          this.startChallengeRun(this.level, { seed: this.challengeSeed, code: this.challengeCode });
         } else {
           this.startLevel(this.level + 1);
+        }
+      } else if (this.phase === "lost") {
+        if (this.isChallengeRun) {
+          this.startChallengeRun(this.level, { seed: this.challengeSeed, code: this.challengeCode });
+        } else {
+          this.startLevel(this.level, { tutorial: this.isTutorialRun, tutorialStage: this.tutorialStage });
         }
       }
     }
@@ -2121,8 +2348,12 @@
       if (this.isMenuDemo) {
         return;
       }
-      if (this.phase === "won") {
-        this.startLevel(this.level, { tutorial: this.isTutorialRun });
+      if (this.phase === "won" || this.phase === "lost") {
+        if (this.isChallengeRun) {
+          this.startChallengeRun(this.level, { seed: this.challengeSeed, code: this.challengeCode });
+        } else {
+          this.startLevel(this.level, { tutorial: this.isTutorialRun, tutorialStage: this.tutorialStage });
+        }
       }
     }
 
@@ -2170,7 +2401,7 @@
       }
       if (this.continueRunBtn) {
         this.continueRunBtn.classList.toggle("hidden", mode !== "won");
-        this.continueRunBtn.textContent = "Continue";
+        this.continueRunBtn.textContent = this.isChallengeRun ? "Rematch" : "Continue";
       }
       if (this.mainMenuBtn) {
         this.mainMenuBtn.classList.remove("hidden");
@@ -2252,6 +2483,7 @@
       this.drawExit(ctx);
       this.drawFocusMask(ctx);
       this.drawImpactEffect(ctx);
+      this.drawGhost(ctx);
       this.drawPlayer(ctx);
       this.drawViewportFrame(ctx);
       ctx.restore();
@@ -2964,6 +3196,82 @@
       ctx.restore();
     }
 
+    drawGhost(ctx) {
+      if (!this.isChallengeRun || !this.ghostState) {
+        return;
+      }
+      if (this.phase === "lost" || this.phase === "won") {
+        return;
+      }
+
+      const now = Date.now();
+      if (!this.ghostState.updatedAt || now - this.ghostState.updatedAt > 3500) {
+        return;
+      }
+
+      const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
+      const gx = Number.isFinite(this.ghostState.renderX) ? this.ghostState.renderX : this.ghostState.x;
+      const gy = Number.isFinite(this.ghostState.renderY) ? this.ghostState.renderY : this.ghostState.y;
+      if (!Number.isFinite(gx) || !Number.isFinite(gy)) {
+        return;
+      }
+
+      const position = this.toScreen(gx, gy);
+      const centerX = position.x + cellSize / 2;
+      const centerY = position.y + cellSize / 2;
+      const size = cellSize * 0.44;
+      const shape = PLAYER_SHAPES.has(this.ghostState.shape) ? this.ghostState.shape : "square";
+      const width = size;
+      const height = size;
+      const px = centerX - width / 2;
+      const py = centerY - height / 2;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
+      ctx.clip();
+      ctx.globalAlpha = 0.34;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = "rgba(180,230,255,0.5)";
+      ctx.fillStyle = "rgba(180,230,255,0.9)";
+      this.drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY);
+      ctx.restore();
+    }
+
+    setGhostState(state) {
+      if (!state || !Number.isFinite(state.x) || !Number.isFinite(state.y)) {
+        return;
+      }
+      this.ghostState = {
+        x: state.x,
+        y: state.y,
+        renderX: Number.isFinite(state.renderX) ? state.renderX : state.x,
+        renderY: Number.isFinite(state.renderY) ? state.renderY : state.y,
+        shape: state.shape,
+        updatedAt: Date.now()
+      };
+    }
+
+    clearGhostState() {
+      this.ghostState = null;
+    }
+
+    getChallengeSnapshot() {
+      if (!this.isChallengeRun || this.isMenuDemo) {
+        return null;
+      }
+      return {
+        level: this.level,
+        x: this.player.x,
+        y: this.player.y,
+        renderX: this.player.renderX,
+        renderY: this.player.renderY,
+        shape: this.playerShape,
+        phase: this.phase,
+        updatedAt: Date.now()
+      };
+    }
+
     getShapeMotionProfile(shape) {
       const defaults = {
         moveStretch: 0.09,
@@ -3334,7 +3642,6 @@
     drawLoseOverlay(ctx, width, height) {
       const progress = this.easeOut(this.clamp(this.loseOverlayTime / 0.42, 0, 1));
       const pulse = 0.74 + Math.sin((this.levelTime + this.loseOverlayTime) * 4.8) * 0.06;
-      const prompt = this.isCoarsePointer() ? "Tap to retry" : "Press to retry";
       const title = "Collapsed";
       const subtitle = `${String(this.levelOrbCount).padStart(2, "0")} orbs recovered`;
       const { frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
@@ -3370,16 +3677,12 @@
       ctx.font = `600 ${Math.max(11, Math.min(17, cardWidth * 0.04))}px ${this.getUiFont()}`;
       ctx.fillText(subtitle, cardX + cardWidth / 2, cardY + cardHeight * 0.52);
 
-      ctx.fillStyle = `rgba(255,255,255,${0.58 + pulse * 0.18})`;
-      ctx.font = `600 ${Math.max(12, Math.min(19, cardWidth * 0.045))}px ${this.getUiFont()}`;
-      ctx.fillText(prompt, cardX + cardWidth / 2, cardY + cardHeight * 0.72);
-
       const lineWidth = cardWidth * 0.28;
       ctx.strokeStyle = `rgba(255,255,255,${0.12 + pulse * 0.16})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(cardX + (cardWidth - lineWidth) / 2, cardY + cardHeight * 0.82);
-      ctx.lineTo(cardX + (cardWidth + lineWidth) / 2, cardY + cardHeight * 0.82);
+      ctx.moveTo(cardX + (cardWidth - lineWidth) / 2, cardY + cardHeight * 0.72);
+      ctx.lineTo(cardX + (cardWidth + lineWidth) / 2, cardY + cardHeight * 0.72);
       ctx.stroke();
       ctx.restore();
     }
@@ -3779,7 +4082,7 @@
     }
 
     setStatusText(fullText, compactText = fullText) {
-      if (!this.isTutorialRun && !this.isMenuDemo) {
+      if (!this.isTutorialRun && !this.isMenuDemo && !this.isChallengeRun) {
         this.statusText.textContent = "";
         return;
       }

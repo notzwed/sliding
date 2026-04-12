@@ -48,6 +48,14 @@
         <p id="messageText" class="message-text"></p>
       </div>
 
+      <div id="tutorialBlur" class="tutorial-blur hidden" aria-hidden="true"></div>
+
+      <div id="tutorialDialog" class="tutorial-dialog hidden">
+        <div id="tutorialAvatar" class="tutorial-avatar tutorial-avatar-square" aria-hidden="true"></div>
+        <p id="tutorialDialogText" class="tutorial-dialog-text"></p>
+        <button id="tutorialDialogNext" class="tutorial-dialog-next" type="button">Next</button>
+      </div>
+
       <div id="interludeActions" class="interlude-actions hidden">
         <button id="replayRunBtn" class="interlude-button" type="button">Retry</button>
         <button id="continueRunBtn" class="interlude-button interlude-button-primary" type="button">Continue</button>
@@ -76,11 +84,12 @@
     </h1>
     <div class="menu-actions">
       <button id="startRunBtn" class="menu-button menu-button-primary" type="button">Start</button>
+      <button id="challengeBtn" class="menu-button" type="button">Challenge</button>
       <button id="storeBtn" class="menu-button" type="button">Shop</button>
     </div>
     <p class="menu-best-time">Best Time <strong id="bestTimeValue">--:--.--</strong></p>
     <p class="menu-orbs">Orbs Collected <strong id="menuOrbsValue">00</strong></p>
-    <button id="tutorialBtn" class="tutorial-button" type="button" aria-label="Apri tutorial">?</button>
+    <button id="tutorialBtn" class="tutorial-button" type="button" aria-label="Open tutorial">?</button>
   </div>
 
   <div id="shopMenu" class="shop-menu hidden" aria-hidden="true">
@@ -143,6 +152,22 @@
       </article>
     </div>
     <button id="closeShopBtn" class="shop-close" type="button">Back</button>
+  </div>
+
+  <div id="challengeMenu" class="challenge-menu hidden" aria-hidden="true">
+    <h2 class="challenge-title">CHALLENGE</h2>
+    <p class="challenge-subtitle">Share the code: same map, same start, transparent rival ghost.</p>
+    <div class="challenge-actions">
+      <button id="createChallengeBtn" class="challenge-action challenge-action-primary" type="button">Create Code</button>
+      <button id="joinChallengeBtn" class="challenge-action" type="button">Join Code</button>
+    </div>
+    <div class="challenge-code-wrap">
+      <span class="challenge-code-label">Code</span>
+      <strong id="challengeCodeValue" class="challenge-code-value">------</strong>
+      <button id="copyChallengeBtn" class="challenge-copy hidden" type="button">Copy</button>
+    </div>
+    <p id="challengeStatusText" class="challenge-status">Create or enter a challenge code.</p>
+    <button id="closeChallengeBtn" class="challenge-close" type="button">Back</button>
   </div>
 
   <div id="installGate" class="install-gate hidden" aria-hidden="true">

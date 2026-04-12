@@ -4,10 +4,13 @@
   const GUEST_WALLET_KEY = "slidey_wallet";
   const GUEST_LEVEL_KEY = "slidey_highest_level";
   const BEST_TIME_KEY = "slidey_best_time_ms";
+  const TUTORIAL_COMPLETED_KEY = "slidey_tutorial_completed";
   const UNLOCKED_SHAPES_KEY = "slidey_unlocked_shapes";
   const SELECTED_SHAPE_KEY = "slidey_selected_shape";
   const DEVICE_ID_KEY = "slidey_device_id";
   const REMOTE_TABLE = "player_profiles";
+  const CHALLENGE_TABLE = "challenge_presence";
+  const CHALLENGE_PREFIX = "SLD";
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
@@ -15,10 +18,18 @@
   const bestTimeValue = document.getElementById("bestTimeValue");
   const menuOrbsValue = document.getElementById("menuOrbsValue");
   const startRunBtn = document.getElementById("startRunBtn");
+  const challengeBtn = document.getElementById("challengeBtn");
   const storeBtn = document.getElementById("storeBtn");
   const tutorialBtn = document.getElementById("tutorialBtn");
   const shopMenu = document.getElementById("shopMenu");
   const closeShopBtn = document.getElementById("closeShopBtn");
+  const challengeMenu = document.getElementById("challengeMenu");
+  const createChallengeBtn = document.getElementById("createChallengeBtn");
+  const joinChallengeBtn = document.getElementById("joinChallengeBtn");
+  const closeChallengeBtn = document.getElementById("closeChallengeBtn");
+  const copyChallengeBtn = document.getElementById("copyChallengeBtn");
+  const challengeCodeValue = document.getElementById("challengeCodeValue");
+  const challengeStatusText = document.getElementById("challengeStatusText");
   const shopOrbsValue = document.getElementById("shopOrbsValue");
   const shapeButtons = Array.from(document.querySelectorAll(".shop-button[data-shape]"));
 
@@ -41,8 +52,14 @@
   let deviceId = "";
   let walletOrbs = 0;
   let highestLevel = 1;
+  let tutorialCompleted = false;
   let selectedShape = "square";
   let unlockedShapes = new Set(["square"]);
+  let challengePushTimer = null;
+  let challengePullTimer = null;
+  let challengeCountdownTimer = null;
+  let challengeRealtimeChannel = null;
+  let challengeRoom = "";
 
   const isIos = () => /iPad|iPhone|iPod/.test(window.navigator.userAgent) ||
     (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
@@ -215,10 +232,34 @@
     shopMenu.setAttribute("aria-hidden", "true");
   };
 
+  const hideChallengeMenu = () => {
+    if (!challengeMenu) {
+      return;
+    }
+    challengeMenu.classList.add("hidden");
+    challengeMenu.setAttribute("aria-hidden", "true");
+  };
+
+  const showChallengeMenu = () => {
+    if (!challengeMenu) {
+      return;
+    }
+    hideShopMenu();
+    challengeMenu.classList.remove("hidden");
+    challengeMenu.setAttribute("aria-hidden", "false");
+  };
+
+  const setChallengeStatus = (text) => {
+    if (challengeStatusText) {
+      challengeStatusText.textContent = text;
+    }
+  };
+
   const showShopMenu = () => {
     if (!shopMenu) {
       return;
     }
+    hideChallengeMenu();
     updateMenuOrbsDisplay();
     updateShapeButtons();
     shopMenu.classList.remove("hidden");
@@ -234,24 +275,246 @@
   };
 
   const startNormalRun = () => {
+    stopChallengeSync();
+    if (!tutorialCompleted) {
+      startTutorialRun();
+      return;
+    }
     const started = withGame((game) => {
+      game.clearGhostState?.();
       game.setUnlockedLevel(highestLevel);
       game.startRun(highestLevel);
     });
     if (started) {
       hideShopMenu();
+      hideChallengeMenu();
       hideStartMenu();
     }
   };
 
   const startTutorialRun = () => {
+    stopChallengeSync();
     const started = withGame((game) => {
+      game.clearGhostState?.();
       game.startTutorialRun();
     });
     if (started) {
       hideShopMenu();
+      hideChallengeMenu();
       hideStartMenu();
     }
+  };
+
+  const clearChallengeCountdown = () => {
+    if (challengeCountdownTimer) {
+      window.clearInterval(challengeCountdownTimer);
+      challengeCountdownTimer = null;
+    }
+  };
+
+  const stopChallengeSync = () => {
+    clearChallengeCountdown();
+    if (challengePushTimer) {
+      window.clearInterval(challengePushTimer);
+      challengePushTimer = null;
+    }
+    if (challengePullTimer) {
+      window.clearInterval(challengePullTimer);
+      challengePullTimer = null;
+    }
+    if (challengeRealtimeChannel && supabaseClient) {
+      void supabaseClient.removeChannel(challengeRealtimeChannel);
+      challengeRealtimeChannel = null;
+    }
+    if (supabaseClient && challengeRoom) {
+      const room = challengeRoom;
+      challengeRoom = "";
+      void supabaseClient
+        .from(CHALLENGE_TABLE)
+        .delete()
+        .eq("challenge_code", room)
+        .eq("device_id", deviceId)
+        .then(() => {
+        })
+        .catch(() => {
+        });
+      return;
+    }
+    challengeRoom = "";
+  };
+
+  const randomCodeChunk = (size) => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let out = "";
+    for (let i = 0; i < size; i += 1) {
+      out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
+  };
+
+  const buildChallengeInfo = () => {
+    const room = randomCodeChunk(6);
+    const seed = (Math.floor(Math.random() * 0xffffffff) >>> 0);
+    const level = Math.max(1, Math.min(highestLevel, 99));
+    const startAtMs = Date.now() + 15000;
+    const startAtSec = Math.floor(startAtMs / 1000);
+    const code = `${CHALLENGE_PREFIX}-${room}-${seed.toString(36).toUpperCase()}-${level.toString(36).toUpperCase()}-${startAtSec.toString(36).toUpperCase()}`;
+    return { room, seed, level, startAtMs, code };
+  };
+
+  const parseChallengeCode = (raw) => {
+    if (!raw || typeof raw !== "string") {
+      return null;
+    }
+    const code = raw.trim().toUpperCase();
+    const match = /^SLD-([A-Z0-9]{6})-([A-Z0-9]+)-([A-Z0-9]+)-([A-Z0-9]+)$/.exec(code);
+    if (!match) {
+      return null;
+    }
+    const room = match[1];
+    const seed = Number.parseInt(match[2], 36);
+    const level = Number.parseInt(match[3], 36);
+    const startAtSec = Number.parseInt(match[4], 36);
+    if (!Number.isFinite(seed) || !Number.isFinite(level) || !Number.isFinite(startAtSec)) {
+      return null;
+    }
+    return {
+      code,
+      room,
+      seed: seed >>> 0,
+      level: Math.max(1, Math.min(99, Math.floor(level))),
+      startAtMs: Math.floor(startAtSec) * 1000
+    };
+  };
+
+  const beginChallengeSync = (room) => {
+    challengeRoom = room;
+    withGame((game) => {
+      game.clearGhostState?.();
+    });
+    if (!supabaseClient) {
+      return;
+    }
+
+    challengeRealtimeChannel = supabaseClient.channel(`challenge-room-${room}`, {
+      config: { broadcast: { self: false } }
+    });
+    challengeRealtimeChannel
+      .on("broadcast", { event: "snapshot" }, ({ payload }) => {
+        if (!payload || payload.deviceId === deviceId) {
+          return;
+        }
+        window.__slideyGame?.setGhostState?.({
+          x: Number(payload.x),
+          y: Number(payload.y),
+          renderX: Number(payload.renderX),
+          renderY: Number(payload.renderY),
+          shape: payload.shape
+        });
+      })
+      .subscribe();
+
+    challengePushTimer = window.setInterval(() => {
+      if (!challengeRoom) {
+        return;
+      }
+      const snapshot = window.__slideyGame?.getChallengeSnapshot?.();
+      if (!snapshot) {
+        return;
+      }
+      const payload = {
+        challenge_code: challengeRoom,
+        device_id: deviceId,
+        level: snapshot.level,
+        pos_x: snapshot.x,
+        pos_y: snapshot.y,
+        render_x: snapshot.renderX,
+        render_y: snapshot.renderY,
+        shape: snapshot.shape,
+        phase: snapshot.phase,
+        updated_at: new Date().toISOString()
+      };
+      void supabaseClient.from(CHALLENGE_TABLE).upsert(payload, { onConflict: "challenge_code,device_id" }).then(() => {
+      }).catch(() => {
+      });
+      void challengeRealtimeChannel?.send({
+        type: "broadcast",
+        event: "snapshot",
+        payload: {
+          deviceId,
+          x: snapshot.x,
+          y: snapshot.y,
+          renderX: snapshot.renderX,
+          renderY: snapshot.renderY,
+          shape: snapshot.shape,
+          phase: snapshot.phase,
+          at: Date.now()
+        }
+      });
+    }, 140);
+
+    challengePullTimer = window.setInterval(async () => {
+      if (!challengeRoom) {
+        return;
+      }
+      const { data, error } = await supabaseClient
+        .from(CHALLENGE_TABLE)
+        .select("pos_x,pos_y,render_x,render_y,shape,updated_at")
+        .eq("challenge_code", challengeRoom)
+        .neq("device_id", deviceId)
+        .order("updated_at", { ascending: false })
+        .limit(1);
+
+      if (error) {
+        return;
+      }
+      const row = Array.isArray(data) ? data[0] : null;
+      if (!row) {
+        window.__slideyGame?.clearGhostState?.();
+        return;
+      }
+      const updatedAt = Date.parse(row.updated_at || "");
+      if (Number.isFinite(updatedAt) && Date.now() - updatedAt > 4000) {
+        window.__slideyGame?.clearGhostState?.();
+        return;
+      }
+      window.__slideyGame?.setGhostState?.({
+        x: Number(row.pos_x),
+        y: Number(row.pos_y),
+        renderX: Number(row.render_x),
+        renderY: Number(row.render_y),
+        shape: row.shape
+      });
+    }, 220);
+  };
+
+  const launchChallenge = (info) => {
+    stopChallengeSync();
+    hideShopMenu();
+    showChallengeMenu();
+    hideStartMenu();
+    if (challengeCodeValue) {
+      challengeCodeValue.textContent = info.code;
+    }
+    setChallengeStatus("Challenge countdown started.");
+
+    const startAt = Math.max(Date.now(), info.startAtMs);
+
+    clearChallengeCountdown();
+    challengeCountdownTimer = window.setInterval(() => {
+      const remaining = Math.max(0, startAt - Date.now());
+      const seconds = Math.ceil(remaining / 1000);
+      setChallengeStatus(`Starting in ${seconds}s. Code: ${info.code}`);
+      if (remaining <= 0) {
+        clearChallengeCountdown();
+        hideChallengeMenu();
+        withGame((game) => {
+          game.clearGhostState?.();
+          game.startChallengeRun(info.level, { seed: info.seed, code: info.room });
+        });
+        beginChallengeSync(info.room);
+      }
+    }, 120);
   };
 
   const ensureGameReady = () => {
@@ -270,7 +533,75 @@
     updateMenuOrbsDisplay();
     updateShapeButtons();
     hideShopMenu();
+    hideChallengeMenu();
+    if (!tutorialCompleted) {
+      hideStartMenu();
+      window.__slideyGame.startTutorialRun();
+      return;
+    }
     showStartMenu();
+  };
+
+  const handleTutorialComplete = (event) => {
+    const alreadyCompleted = tutorialCompleted;
+    tutorialCompleted = true;
+    window.localStorage.setItem(TUTORIAL_COMPLETED_KEY, "1");
+
+    if (!alreadyCompleted) {
+      const reward = Math.max(0, readNumber(event.detail?.reward, 20));
+      if (reward > 0) {
+        setLocalState(walletOrbs + reward, highestLevel);
+      }
+      if (supabaseClient) {
+        void upsertRemoteProfile().catch(() => {
+        });
+      }
+    }
+  };
+
+  const createChallenge = () => {
+    const info = buildChallengeInfo();
+    if (challengeCodeValue) {
+      challengeCodeValue.textContent = info.code;
+    }
+    copyChallengeBtn?.classList.remove("hidden");
+    setChallengeStatus("Code created. Share it with your friend. Countdown is live.");
+    launchChallenge(info);
+  };
+
+  const joinChallenge = () => {
+    const raw = window.prompt("Enter a challenge code");
+    if (!raw) {
+      return;
+    }
+    const info = parseChallengeCode(raw);
+    if (!info) {
+      setChallengeStatus("Invalid code.");
+      return;
+    }
+    if (info.startAtMs < Date.now() - 1000) {
+      setChallengeStatus("Code expired. Ask for a fresh challenge code.");
+      return;
+    }
+    if (challengeCodeValue) {
+      challengeCodeValue.textContent = info.code;
+    }
+    copyChallengeBtn?.classList.remove("hidden");
+    setChallengeStatus("Challenge accepted. Get ready for the start.");
+    launchChallenge(info);
+  };
+
+  const copyChallengeCode = async () => {
+    const code = (challengeCodeValue?.textContent || "").trim();
+    if (!code || code === "------") {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+      setChallengeStatus("Code copied.");
+    } catch (_error) {
+      setChallengeStatus("Auto-copy failed. Copy it manually.");
+    }
   };
 
   const spendOrbs = (amount) => {
@@ -463,10 +794,16 @@
     deviceId = getOrCreateDeviceId();
     walletOrbs = Math.max(0, readNumber(window.localStorage.getItem(GUEST_WALLET_KEY), 0));
     highestLevel = Math.max(1, readNumber(window.localStorage.getItem(GUEST_LEVEL_KEY), 1));
+    tutorialCompleted = window.localStorage.getItem(TUTORIAL_COMPLETED_KEY) === "1";
     unlockedShapes = readUnlockedShapes();
     const storedShape = window.localStorage.getItem(SELECTED_SHAPE_KEY);
     selectedShape = unlockedShapes.has(storedShape) && ALLOWED_SHAPES.has(storedShape) ? storedShape : "square";
     persistShapeState();
+    if (challengeCodeValue) {
+      challengeCodeValue.textContent = "------";
+    }
+    copyChallengeBtn?.classList.add("hidden");
+    setChallengeStatus("Create or enter a challenge code.");
     updateBestTimeDisplay(readNumber(window.localStorage.getItem(BEST_TIME_KEY), 0));
     updateMenuOrbsDisplay();
     applyWalletToGame();
@@ -486,9 +823,20 @@
     void handleInstallAction();
   });
   startRunBtn?.addEventListener("click", startNormalRun);
+  challengeBtn?.addEventListener("click", showChallengeMenu);
   tutorialBtn?.addEventListener("click", startTutorialRun);
   storeBtn?.addEventListener("click", showShopMenu);
   closeShopBtn?.addEventListener("click", hideShopMenu);
+  createChallengeBtn?.addEventListener("click", createChallenge);
+  joinChallengeBtn?.addEventListener("click", joinChallenge);
+  copyChallengeBtn?.addEventListener("click", () => {
+    void copyChallengeCode();
+  });
+  closeChallengeBtn?.addEventListener("click", () => {
+    stopChallengeSync();
+    hideChallengeMenu();
+    showStartMenu();
+  });
   for (const button of shapeButtons) {
     button.addEventListener("click", () => {
       const shape = button.dataset.shape;
@@ -501,11 +849,15 @@
   }
 
   window.addEventListener("slidey:orbs-earned", onOrbsEarned);
+  window.addEventListener("slidey:tutorial-complete", handleTutorialComplete);
   window.addEventListener("slidey:best-time-updated", (event) => {
     updateBestTimeDisplay(readNumber(event.detail?.bestTimeMs, 0));
   });
   window.addEventListener("slidey:return-to-main", () => {
+    stopChallengeSync();
+    window.__slideyGame?.clearGhostState?.();
     hideShopMenu();
+    hideChallengeMenu();
     showStartMenu();
   });
 
