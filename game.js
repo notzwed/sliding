@@ -3280,6 +3280,22 @@
       this.ghostState = null;
     }
 
+    forceChallengeLoss() {
+      if (!this.isChallengeRun) {
+        return;
+      }
+      if (this.phase !== "playing") {
+        return;
+      }
+      this.phase = "lost";
+      this.hideInterludeActions();
+      this.hideMessage();
+      this.setStatusText(
+        "Rival finished first. Challenge locked.",
+        "Rival finished first."
+      );
+    }
+
     getChallengeSnapshot() {
       if (!this.isChallengeRun || this.isMenuDemo) {
         return null;

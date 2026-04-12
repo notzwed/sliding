@@ -468,6 +468,16 @@
     return parsed;
   };
 
+  const enforceChallengeStopFromOpponentWin = () => {
+    if (challengeLocalResult) {
+      return;
+    }
+    challengeLocalResult = { phase: "lost", runMs: 0, forced: true };
+    withGame((game) => {
+      game.forceChallengeLoss?.();
+    });
+  };
+
   const closeChallengeAfterResult = () => {
     stopChallengeSync();
     window.__slideyGame?.clearGhostState?.();
@@ -493,11 +503,11 @@
     } else if (challengeLocalResult.phase === "won" && challengeOpponentResult.phase === "lost") {
       first = "YOU";
       last = "OPPONENT";
-      detail = `You escaped in ${formatTime(challengeLocalResult.runMs)}.`;
+      detail = `You finished first in ${formatTime(challengeLocalResult.runMs)}.`;
     } else if (challengeLocalResult.phase === "lost" && challengeOpponentResult.phase === "won") {
       first = "OPPONENT";
       last = "YOU";
-      detail = `Opponent escaped in ${formatTime(challengeOpponentResult.runMs)}.`;
+      detail = `Opponent finished first in ${formatTime(challengeOpponentResult.runMs)}.`;
     } else {
       first = "NO WINNER";
       last = "BOTH COLLAPSED";
@@ -532,7 +542,10 @@
         if (!payload || payload.deviceId === deviceId) {
           return;
         }
-        updateOpponentChallengeResult(payload.phaseToken || payload.phase || "playing");
+        const opponentParsed = updateOpponentChallengeResult(payload.phaseToken || payload.phase || "playing");
+        if (opponentParsed.phase === "won") {
+          enforceChallengeStopFromOpponentWin();
+        }
         window.__slideyGame?.setGhostState?.({
           x: Number(payload.x),
           y: Number(payload.y),
@@ -553,6 +566,9 @@
         return;
       }
       const { phaseToken, parsed } = updateLocalChallengeResult(snapshot);
+      if (parsed.phase === "won" && !challengeOpponentResult) {
+        challengeOpponentResult = { phase: "lost", runMs: 0, forced: true };
+      }
       const payload = {
         challenge_code: challengeRoom,
         device_id: deviceId,
@@ -612,6 +628,10 @@
         return;
       }
       updateOpponentChallengeResult(row.phase || "playing");
+      const opponentParsed = parsePhaseToken(row.phase || "playing");
+      if (opponentParsed.phase === "won") {
+        enforceChallengeStopFromOpponentWin();
+      }
       window.__slideyGame?.setGhostState?.({
         x: Number(row.pos_x),
         y: Number(row.pos_y),
