@@ -9,6 +9,9 @@
     introFocusDuration: 1.15,
     maxLevel: 99,
   };
+  const BEST_TIME_KEY = "slidey_best_time_ms";
+  const TOP_RECORD_KEY = "slidey_top_record";
+  const PLAYER_SHAPES = new Set(["square", "triangle", "circle", "diamond", "hex", "star", "capsule", "cross", "droplet"]);
 
   class RNG {
     constructor(seed) {
@@ -43,20 +46,42 @@
       this.ctx = this.canvas.getContext("2d", { alpha: false, desynchronized: false });
       this.levelValue = document.getElementById("levelValue");
       this.orbValue = document.getElementById("orbValue");
+      this.timerValue = document.getElementById("timerValue");
       this.runValue = document.getElementById("runValue");
       this.statusText = document.getElementById("statusText");
       this.dangerFill = document.getElementById("dangerFill");
       this.messagePanel = document.getElementById("messagePanel");
       this.messageTitle = document.getElementById("messageTitle");
       this.messageText = document.getElementById("messageText");
+      this.interludeActions = document.getElementById("interludeActions");
+      this.replayRunBtn = document.getElementById("replayRunBtn");
+      this.continueRunBtn = document.getElementById("continueRunBtn");
+      this.mainMenuBtn = document.getElementById("mainMenuBtn");
 
       this.level = 1;
+      this.unlockedLevel = 1;
       this.runOrbs = 0;
+      this.playerShape = "square";
+      this.bestTimeMs = this.readStoredNumber(BEST_TIME_KEY, 0);
+      this.topRecord = this.loadTopRecord();
+      this.currentRunTimeMs = 0;
+      this.runClockTime = 0;
+      this.lastRunBeatTop = false;
+      this.collapseFreezeRemaining = 0;
+      this.orbMultiplierRemaining = 0;
+      this.orbMultiplierValue = 1;
+      this.freezeWaveOrigin = null;
       this.lastTimestamp = 0;
       this.lastDelta = 1 / 60;
       this.pointerStart = null;
       this.activePointerId = null;
       this.pendingDirection = null;
+      this.lastMoveDirection = { dx: 0, dy: -1 };
+      this.triangleSpinTime = 0;
+      this.isMenuDemo = false;
+      this.isTutorialRun = false;
+      this.tutorialStep = 0;
+      this.demoStepCooldown = 0;
       this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
       this.performanceProfile = this.computePerformanceProfile(window.innerWidth, window.innerHeight);
       this.boardMetrics = null;
@@ -78,8 +103,66 @@
       this.resizeCanvas();
       this.bindEvents();
       this.startLevel(this.level);
+      this.enterMenuDemo();
       window.__slideyGame = this;
       window.requestAnimationFrame((timestamp) => this.loop(timestamp));
+    }
+
+    readStoredNumber(key, fallback = 0) {
+      const raw = window.localStorage.getItem(key);
+      const value = Number(raw);
+      return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
+    }
+
+    loadTopRecord() {
+      const raw = window.localStorage.getItem(TOP_RECORD_KEY);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.name === "string" && Number.isFinite(parsed.timeMs) && parsed.timeMs > 0) {
+            return { name: parsed.name, timeMs: Math.floor(parsed.timeMs) };
+          }
+        } catch (_error) {
+        }
+      }
+      return { name: "Top Runner", timeMs: 62000 };
+    }
+
+    saveTopRecord() {
+      window.localStorage.setItem(TOP_RECORD_KEY, JSON.stringify(this.topRecord));
+    }
+
+    formatTime(ms) {
+      const safe = Math.max(0, Math.floor(ms));
+      const minutes = Math.floor(safe / 60000);
+      const seconds = Math.floor((safe % 60000) / 1000);
+      const centiseconds = Math.floor((safe % 1000) / 10);
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
+    }
+
+    getBestTimeMs() {
+      return this.bestTimeMs;
+    }
+
+    getTopRecord() {
+      return { ...this.topRecord };
+    }
+
+    setUnlockedLevel(level) {
+      const safe = Math.max(1, Number.isFinite(level) ? Math.floor(level) : 1);
+      this.unlockedLevel = Math.min(BASE_CONFIG.maxLevel, safe);
+    }
+
+    startRun(level = this.unlockedLevel) {
+      this.startLevel(level);
+    }
+
+    startTutorialRun() {
+      this.startLevel(1, { tutorial: true });
+    }
+
+    enterMenuDemo() {
+      this.startLevel(1, { menuDemo: true });
     }
 
     bindEvents() {
@@ -145,9 +228,23 @@
         }
       });
 
+      this.replayRunBtn?.addEventListener("click", () => {
+        this.handleReplayInput();
+      });
+
+      this.continueRunBtn?.addEventListener("click", () => {
+        this.handleInterludeInput();
+      });
+
+      this.mainMenuBtn?.addEventListener("click", () => {
+        this.returnToMainMenu();
+      });
+
       window.addEventListener("keydown", (event) => {
         if (this.phase !== "playing") {
-          if ([" ", "Enter", "r", "R"].includes(event.key)) {
+          if (event.key === "r" || event.key === "R") {
+            this.handleReplayInput();
+          } else if ([" ", "Enter", "n", "N"].includes(event.key)) {
             this.handleInterludeInput();
           }
           return;
@@ -197,10 +294,16 @@
       window.requestAnimationFrame((nextTimestamp) => this.loop(nextTimestamp));
     }
 
-    startLevel(level) {
+    startLevel(level, options = {}) {
+      const tutorial = Boolean(options.tutorial);
+      const menuDemo = Boolean(options.menuDemo);
       this.phase = "playing";
       this.level = Math.max(1, Math.min(level, BASE_CONFIG.maxLevel));
-      this.levelData = this.buildLevel(this.level);
+      this.isTutorialRun = tutorial;
+      this.isMenuDemo = menuDemo;
+      this.tutorialStep = 0;
+      this.demoStepCooldown = 0;
+      this.levelData = tutorial ? this.buildTutorialLevel() : this.buildLevel(this.level);
       this.player = {
         x: this.levelData.start.x,
         y: this.levelData.start.y,
@@ -217,15 +320,32 @@
       this.deathEffect = null;
       this.winOverlayTime = 0;
       this.loseOverlayTime = 0;
+      this.currentRunTimeMs = 0;
+      this.runClockTime = 0;
+      this.lastRunBeatTop = false;
+      this.collapseFreezeRemaining = 0;
+      this.orbMultiplierRemaining = 0;
+      this.orbMultiplierValue = 1;
+      this.freezeWaveOrigin = null;
       this.ambientField = this.buildAmbientField(this.levelData.seed);
       this.hideMessage();
+      this.hideInterludeActions();
       this.levelValue.textContent = String(this.level).padStart(2, "0");
       this.updateBoardMetrics();
       this.resetCamera();
-      this.setStatusText(
-        "One swipe sends the cube sliding until the next wall. Every second lost brings the collapse closer.",
-        "Swipe to slide into walls."
-      );
+      if (tutorial) {
+        this.setStatusText(
+          "Tutorial 1/3: fai uno swipe. Il cubo scivola finché non trova un muro dove fermarsi.",
+          "1/3 fai uno swipe e fermati su un muro."
+        );
+      } else if (menuDemo) {
+        this.setStatusText(
+          "Attract mode running in background.",
+          "Background demo."
+        );
+      } else {
+        this.setStatusText("", "");
+      }
       this.updateHud();
     }
 
@@ -253,10 +373,66 @@
       throw new Error("Unable to generate a solvable slide maze.");
     }
 
+    buildTutorialLevel() {
+      const rows = 11;
+      const cols = 11;
+      const grid = Array.from({ length: rows }, () => Array(cols).fill("wall"));
+      const floorCells = [
+        [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
+        [3, 8], [3, 7], [3, 6], [3, 5], [3, 4], [3, 3],
+        [4, 3], [5, 3], [6, 3], [7, 3], [8, 3], [9, 3],
+        [9, 2], [9, 1], [9, 4], [9, 5], [9, 6], [9, 7], [9, 8],
+        [4, 7], [5, 7], [6, 7], [7, 7], [8, 7]
+      ];
+
+      for (const [x, y] of floorCells) {
+        grid[y][x] = "floor";
+      }
+
+      const start = { x: 1, y: 9 };
+      const exit = { x: 9, y: 1 };
+      const orbCells = new Map();
+      orbCells.set(this.cellKey(5, 9), { x: 5, y: 9, type: "normal", collected: false });
+      orbCells.set(this.cellKey(3, 6), { x: 3, y: 6, type: "normal", collected: false });
+      orbCells.set(this.cellKey(7, 3), { x: 7, y: 3, type: "normal", collected: false });
+
+      const collapseAt = Array.from({ length: rows }, () => Array(cols).fill(Number.POSITIVE_INFINITY));
+      for (const [x, y] of floorCells) {
+        collapseAt[y][x] = 120;
+      }
+      collapseAt[start.y][start.x] = 120;
+      collapseAt[exit.y][exit.x] = 120;
+
+      const mainPathSet = new Set(floorCells.map(([x, y]) => this.cellKey(x, y)));
+      const slideGraph = { edges: new Map() };
+      const slideAnalysis = {
+        strongNodes: new Set(mainPathSet),
+        reversibleCells: new Set(mainPathSet),
+        trappedSegments: []
+      };
+
+      return {
+        seed: 20260412,
+        cols,
+        rows,
+        grid,
+        start,
+        exit,
+        orbCells,
+        collapseAt,
+        mainPathSet,
+        slideSolution: { path: [], cellSet: mainPathSet, arrivalTimes: new Map() },
+        slideGraph,
+        slideAnalysis,
+        dynamicWallMap: new Map(),
+        maxCollapseTime: 120
+      };
+    }
+
     generateLevelCandidate(level, seed, softMode = false) {
       const rng = new RNG(seed);
-      const cols = this.toOdd(Math.min(17 + (level - 1) * 2, 29));
-      const rows = this.toOdd(Math.min(21 + (level - 1) * 2, 35));
+      const cols = this.toOdd(Math.min(17 + Math.floor((level - 1) * 2.4), 37));
+      const rows = this.toOdd(Math.min(21 + Math.floor((level - 1) * 2.7), 45));
       const grid = Array.from({ length: rows }, () => Array(cols).fill("wall"));
 
       const internalStart = { x: this.closestOdd(Math.floor(cols / 2)), y: rows - 2 };
@@ -294,7 +470,7 @@
         }
       }
 
-      const extraLoops = Math.floor((cols * rows) / 38) + Math.ceil(level * 1.5);
+      const extraLoops = Math.floor((cols * rows) / 34) + Math.ceil(level * 2.1);
       for (let i = 0; i < extraLoops; i += 1) {
         const vertical = rng.next() > 0.5;
         const x = vertical ? this.closestEven(rng.int(2, cols - 3)) : this.closestOdd(rng.int(1, cols - 2));
@@ -387,6 +563,7 @@
         return null;
       }
       const orbCells = orbAccessibility.orbCells;
+      this.assignSpecialOrbs(orbCells, refreshed.distances, collapseAt, start, level, rng);
       const dynamicWallMap = this.buildDynamicWalls(grid, level, mainPathSet, orbCells, start, exit, rng);
 
       return {
@@ -409,7 +586,7 @@
 
     buildDynamicWalls(grid, level, mainPathSet, orbCells, start, exit, rng) {
       const map = new Map();
-      if (level < 20) {
+      if (level < 12) {
         return map;
       }
 
@@ -446,9 +623,9 @@
       }
 
       rng.shuffle(candidates);
-      const dynamicCount = Math.min(candidates.length, Math.max(2, Math.min(14, Math.floor((level - 16) * 0.55))));
-      const cycleBase = this.clamp(2.7 - (level - 20) * 0.03, 1.35, 2.7);
-      const openWindowBase = this.clamp(0.44 - (level - 20) * 0.004, 0.26, 0.44);
+      const dynamicCount = Math.min(candidates.length, Math.max(2, Math.min(20, Math.floor((level - 10) * 0.72))));
+      const cycleBase = this.clamp(2.55 - (level - 12) * 0.034, 1.1, 2.55);
+      const openWindowBase = this.clamp(0.42 - (level - 12) * 0.005, 0.2, 0.42);
 
       for (let i = 0; i < dynamicCount; i += 1) {
         const cell = candidates[i];
@@ -912,6 +1089,7 @@
         orbs.set(key, {
           x: cell.x,
           y: cell.y,
+          type: "normal",
           collected: false,
         });
         return true;
@@ -992,6 +1170,61 @@
       }
 
       return orbs;
+    }
+
+    assignSpecialOrbs(orbs, distances, collapseAt, start, level, rng) {
+      const rows = collapseAt.length;
+      const cols = collapseAt[0].length;
+      const candidates = Array.from(orbs.values()).filter((orb) => orb.type === "normal");
+      if (candidates.length === 0) {
+        return;
+      }
+
+      const scored = candidates.map((orb) => {
+        const distance = Math.max(0, distances[orb.y]?.[orb.x] ?? 0);
+        const collapseTime = collapseAt[orb.y]?.[orb.x] ?? 999;
+        const travelEstimate = distance * 0.07 + 1.15;
+        const safetyMargin = Math.max(0.1, collapseTime - travelEstimate);
+        const urgency = 1 / safetyMargin;
+        const upperMapBias = orb.y < Math.floor(rows * 0.45) ? 1.6 : 0;
+        const edgeRiskBias = (orb.x <= 2 || orb.x >= cols - 3) ? 0.8 : 0;
+        const farFromStart = Math.hypot(orb.x - start.x, orb.y - start.y);
+        const score = distance * 1.22 + farFromStart * 0.28 + urgency * 24 + upperMapBias + edgeRiskBias;
+        return { orb, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+
+      const pickWeighted = (sliceFrom = 0, sliceTo = 1) => {
+        const from = Math.floor(scored.length * sliceFrom);
+        const to = Math.max(from + 1, Math.floor(scored.length * sliceTo));
+        const pool = scored.slice(from, to);
+        if (pool.length === 0) {
+          return null;
+        }
+        const jittered = pool
+          .map((entry) => ({ entry, jitter: entry.score * (0.86 + rng.next() * 0.28) }))
+          .sort((a, b) => b.jitter - a.jitter);
+        return jittered[0].entry.orb;
+      };
+
+      const yellow = pickWeighted(0.08, 0.46);
+      if (yellow) {
+        yellow.type = "multiplier";
+      }
+
+      if (level >= 3) {
+        const red = pickWeighted(0, 0.3);
+        if (red && red !== yellow) {
+          red.type = "freeze";
+        } else {
+          for (const candidate of scored) {
+            if (candidate.orb !== yellow) {
+              candidate.orb.type = "freeze";
+              break;
+            }
+          }
+        }
+      }
     }
 
     getTargetOrbCount(reversibleCellCount, level) {
@@ -1247,7 +1480,106 @@
       return max;
     }
 
+    tickRunClock(delta) {
+      this.runClockTime += delta;
+      this.currentRunTimeMs = Math.floor(this.runClockTime * 1000);
+    }
+
+    tickCollapseClock(delta) {
+      if (this.collapseFreezeRemaining > 0) {
+        const consumed = Math.min(this.collapseFreezeRemaining, delta);
+        this.collapseFreezeRemaining -= consumed;
+        return;
+      }
+      this.levelTime += delta;
+    }
+
+    tickOrbEffects(delta) {
+      if (this.orbMultiplierRemaining > 0) {
+        this.orbMultiplierRemaining = Math.max(0, this.orbMultiplierRemaining - delta);
+        if (this.orbMultiplierRemaining <= 0) {
+          this.orbMultiplierValue = 1;
+        }
+      }
+    }
+
+    getFreezeWaveState() {
+      if (!this.freezeWaveOrigin || this.collapseFreezeRemaining <= 0 || !this.levelData) {
+        return {
+          active: false,
+          phase: "none",
+          factor: 0,
+          center: null,
+          radiusCells: 0,
+          maxRadiusCells: 0
+        };
+      }
+
+      const total = 4;
+      const outDuration = 0.85;
+      const backDuration = 0.85;
+      const elapsed = total - this.collapseFreezeRemaining;
+      const maxRadiusCells = Math.hypot(this.levelData.cols, this.levelData.rows);
+      let phase = "hold";
+      let factor = 1;
+      let radiusCells = maxRadiusCells;
+      let center = { x: this.freezeWaveOrigin.x, y: this.freezeWaveOrigin.y };
+
+      if (elapsed < outDuration) {
+        phase = "out";
+        const p = this.clamp(elapsed / outDuration, 0, 1);
+        factor = p;
+        radiusCells = maxRadiusCells * this.easeOut(p);
+      } else if (this.collapseFreezeRemaining <= backDuration) {
+        phase = "back";
+        const p = this.clamp(1 - this.collapseFreezeRemaining / backDuration, 0, 1);
+        factor = 1 - p;
+        radiusCells = maxRadiusCells * (1 - this.easeInOutSine(p));
+        center = {
+          x: this.lerp(this.freezeWaveOrigin.x, this.player.renderX, p),
+          y: this.lerp(this.freezeWaveOrigin.y, this.player.renderY, p)
+        };
+      }
+
+      return {
+        active: true,
+        phase,
+        factor,
+        center,
+        radiusCells,
+        maxRadiusCells
+      };
+    }
+
+    getFreezeTintAtCell(x, y) {
+      const wave = this.getFreezeWaveState();
+      if (!wave.active || !wave.center) {
+        return 0;
+      }
+
+      if (wave.phase === "hold") {
+        return wave.factor;
+      }
+
+      const distance = Math.hypot(x - wave.center.x, y - wave.center.y);
+      if (distance <= wave.radiusCells) {
+        return wave.factor;
+      }
+      if (wave.phase === "out") {
+        const edgeSoftness = 1.5;
+        if (distance <= wave.radiusCells + edgeSoftness) {
+          return wave.factor * (1 - (distance - wave.radiusCells) / edgeSoftness) * 0.7;
+        }
+      }
+      return 0;
+    }
+
     update(delta) {
+      if (this.isMenuDemo) {
+        this.updateMenuDemo(delta);
+        return;
+      }
+
       if (this.phase === "exiting") {
         this.updateExitEffect(delta);
         this.updateCamera();
@@ -1272,7 +1604,12 @@
         return;
       }
 
-      this.levelTime += delta;
+      this.tickRunClock(delta);
+      this.tickCollapseClock(delta);
+      this.tickOrbEffects(delta);
+      if (this.moveState) {
+        this.triangleSpinTime += delta * 6.8;
+      }
       this.introFocusTime = Math.max(0, this.introFocusTime - delta);
       this.updateMovement(delta);
       this.updateImpact(delta);
@@ -1292,8 +1629,83 @@
       this.updateHud();
     }
 
-    queueMove(dx, dy) {
-      if (window.__neonInstallLock || this.phase !== "playing" || this.moveState || this.pendingDirection) {
+    updateMenuDemo(delta) {
+      if (this.phase === "won" || this.phase === "lost") {
+        this.demoStepCooldown -= delta;
+        if (this.demoStepCooldown <= 0) {
+          this.startLevel(1, { menuDemo: true });
+        }
+        return;
+      }
+
+      if (this.phase === "exiting") {
+        this.updateExitEffect(delta);
+        this.updateCamera();
+        return;
+      }
+
+      if (this.phase === "dying") {
+        this.updateDeathEffect(delta);
+        this.updateCamera();
+        return;
+      }
+
+      this.tickRunClock(delta);
+      this.tickCollapseClock(delta);
+      this.tickOrbEffects(delta);
+      if (this.moveState) {
+        this.triangleSpinTime += delta * 6.8;
+      }
+      this.introFocusTime = Math.max(0, this.introFocusTime - delta);
+      this.updateMovement(delta);
+      this.updateImpact(delta);
+      this.collectOrbIfNeeded();
+      this.updateCamera();
+
+      if (this.isCollapsed(this.player.x, this.player.y)) {
+        this.beginLoseSequence();
+        return;
+      }
+
+      if (this.player.x === this.levelData.exit.x && this.player.y === this.levelData.exit.y) {
+        if (this.isTutorialRun && this.levelOrbCount < 1) {
+          this.setStatusText(
+            "Prima di uscire, raccogli almeno una orb per capire la meccanica base.",
+            "Prendi 1 orb prima dell'uscita."
+          );
+          return;
+        }
+        this.beginExitSequence();
+        return;
+      }
+
+      this.demoStepCooldown -= delta;
+      if (this.demoStepCooldown <= 0 && !this.moveState && !this.pendingDirection) {
+        const moves = [
+          { dx: 1, dy: 0 },
+          { dx: -1, dy: 0 },
+          { dx: 0, dy: 1 },
+          { dx: 0, dy: -1 }
+        ];
+        for (let i = moves.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [moves[i], moves[j]] = [moves[j], moves[i]];
+        }
+        for (const move of moves) {
+          const path = this.findSlidePath(move.dx, move.dy);
+          if (path.length > 1) {
+            this.queueMove(move.dx, move.dy, true);
+            this.demoStepCooldown = 0.12 + Math.random() * 0.18;
+            break;
+          }
+        }
+      }
+
+      this.updateHud();
+    }
+
+    queueMove(dx, dy, force = false) {
+      if (!force && (window.__neonInstallLock || this.isMenuDemo || this.phase !== "playing" || this.moveState || this.pendingDirection)) {
         return;
       }
       this.pendingDirection = { dx, dy };
@@ -1309,10 +1721,19 @@
         return false;
       }
 
+      if (this.isTutorialRun && this.tutorialStep === 0) {
+        this.tutorialStep = 1;
+        this.setStatusText(
+          "Tutorial 2/3: perfetto. Adesso raccogli una orb luminosa.",
+          "2/3 prendi una orb."
+        );
+      }
+
       const from = path[0];
       const to = path[path.length - 1];
       const distance = path.length - 1;
       const duration = this.getSlideDuration(distance);
+      this.lastMoveDirection = { dx, dy };
       this.moveState = {
         from,
         to,
@@ -1392,11 +1813,48 @@
       }
 
       orb.collected = true;
-      this.levelOrbCount += 1;
-      this.setStatusText(
-        "Orb collected. Keep pushing upward before the maze gives way.",
-        "Orb collected. Keep climbing."
-      );
+      const orbType = orb.type || "normal";
+      let gained = orbType === "normal" ? this.orbMultiplierValue : 0;
+      if (orbType === "multiplier") {
+        this.orbMultiplierRemaining = Math.max(this.orbMultiplierRemaining, 8);
+        this.orbMultiplierValue = 2;
+      } else if (orbType === "freeze") {
+        this.collapseFreezeRemaining = Math.max(this.collapseFreezeRemaining, 4);
+        this.freezeWaveOrigin = { x: orb.x, y: orb.y };
+      }
+
+      this.levelOrbCount += gained;
+      if (this.isTutorialRun) {
+        if (this.levelOrbCount === 1) {
+          this.tutorialStep = Math.max(this.tutorialStep, 2);
+          this.setStatusText(
+            "Tutorial 3/3: ottimo. Ora raggiungi l'uscita per completare il tutorial.",
+            "3/3 vai all'uscita."
+          );
+        } else {
+          this.setStatusText(
+            "Ottimo controllo. Prova a leggere la traiettoria prima di ogni swipe.",
+            "Buono: leggi la traiettoria."
+          );
+        }
+      } else {
+        if (orbType === "multiplier") {
+          this.setStatusText(
+            "Yellow orb: x2 orbs active for 8 seconds.",
+            "Yellow orb: x2 active."
+          );
+        } else if (orbType === "freeze") {
+          this.setStatusText(
+            "Red orb: collapse frozen for 4 seconds.",
+            "Red orb: freeze 4s."
+          );
+        } else {
+          this.setStatusText(
+            "Orb collected. Keep pushing upward before the maze gives way.",
+            "Orb collected. Keep climbing."
+          );
+        }
+      }
     }
 
     updateImpact(delta) {
@@ -1533,7 +1991,7 @@
       this.exitEffect = null;
       this.deathEffect = {
         time: 0,
-        duration: 0.58,
+        duration: 0.76,
         shards: this.buildDeathShards(this.player.x, this.player.y),
       };
       this.hideMessage();
@@ -1558,7 +2016,13 @@
     loseLevel() {
       this.phase = "lost";
       this.loseOverlayTime = 0;
+      if (this.isMenuDemo) {
+        this.demoStepCooldown = 0.22;
+        this.hideInterludeActions();
+        return;
+      }
       this.hideMessage();
+      this.showInterludeActions("lost");
       this.setStatusText(
         "The collapse got you. Reset and choose a cleaner line.",
         "The collapse got you."
@@ -1569,6 +2033,31 @@
       this.phase = "won";
       this.exitEffect = null;
       this.winOverlayTime = 0;
+      if (this.isMenuDemo) {
+        this.demoStepCooldown = 0.28;
+        this.hideInterludeActions();
+        return;
+      }
+
+      this.currentRunTimeMs = Math.floor(this.runClockTime * 1000);
+      this.lastRunBeatTop = false;
+
+      if (!this.isTutorialRun && this.currentRunTimeMs > 0) {
+        if (this.bestTimeMs <= 0 || this.currentRunTimeMs < this.bestTimeMs) {
+          this.bestTimeMs = this.currentRunTimeMs;
+          window.localStorage.setItem(BEST_TIME_KEY, String(this.bestTimeMs));
+          window.dispatchEvent(new CustomEvent("slidey:best-time-updated", {
+            detail: { bestTimeMs: this.bestTimeMs }
+          }));
+        }
+
+        if (this.currentRunTimeMs < this.topRecord.timeMs) {
+          this.topRecord = { name: "YOU", timeMs: this.currentRunTimeMs };
+          this.lastRunBeatTop = true;
+          this.saveTopRecord();
+        }
+      }
+
       const gainedOrbs = this.levelOrbCount;
       this.runOrbs += gainedOrbs;
       this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
@@ -1581,10 +2070,18 @@
         }
       }));
       this.hideMessage();
-      this.setStatusText(
-        "You made it through the collapse. The next maze will be denser and more unstable.",
-        "Level complete."
-      );
+      this.showInterludeActions("won");
+      if (this.isTutorialRun) {
+        this.setStatusText(
+          "Tutorial completato: ora puoi iniziare una run normale dal menu Start.",
+          "Tutorial completato."
+        );
+      } else {
+        this.setStatusText(
+          "You made it through the collapse. The next maze will be denser and more unstable.",
+          "Level complete."
+        );
+      }
     }
 
     setWalletOrbs(orbs) {
@@ -1593,22 +2090,57 @@
       this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
     }
 
+    setPlayerShape(shape) {
+      if (!PLAYER_SHAPES.has(shape)) {
+        return;
+      }
+      this.playerShape = shape;
+    }
+
     handleInterludeInput() {
       if (window.__neonInstallLock) {
         return;
       }
+      if (this.isMenuDemo) {
+        return;
+      }
 
       if (this.phase === "won") {
-        this.startLevel(this.level + 1);
-      } else if (this.phase === "lost") {
-        this.startLevel(this.level);
+        if (this.isTutorialRun) {
+          this.startLevel(this.unlockedLevel);
+        } else {
+          this.startLevel(this.level + 1);
+        }
       }
     }
 
+    handleReplayInput() {
+      if (window.__neonInstallLock) {
+        return;
+      }
+      if (this.isMenuDemo) {
+        return;
+      }
+      if (this.phase === "won") {
+        this.startLevel(this.level, { tutorial: this.isTutorialRun });
+      }
+    }
+
+    returnToMainMenu() {
+      if (window.__neonInstallLock) {
+        return;
+      }
+      this.enterMenuDemo();
+      window.dispatchEvent(new CustomEvent("slidey:return-to-main"));
+    }
+
     updateHud() {
-      const totalOrbs = this.levelData.orbCells.size;
+      const totalOrbs = this.countNormalOrbs();
       this.orbValue.textContent = `${String(this.levelOrbCount).padStart(2, "0")} / ${String(totalOrbs).padStart(2, "0")}`;
       this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
+      if (this.timerValue) {
+        this.timerValue.textContent = this.formatTime(this.currentRunTimeMs);
+      }
       const ratio = this.clamp(this.levelTime / this.levelData.maxCollapseTime, 0, 1);
       this.dangerFill.style.width = `${ratio * 100}%`;
     }
@@ -1621,6 +2153,42 @@
 
     hideMessage() {
       this.messagePanel.classList.add("hidden");
+    }
+
+    showInterludeActions(mode) {
+      if (!this.interludeActions) {
+        return;
+      }
+      if (mode !== "won" && mode !== "lost") {
+        this.hideInterludeActions();
+        return;
+      }
+      this.interludeActions.classList.remove("hidden");
+      if (this.replayRunBtn) {
+        this.replayRunBtn.classList.remove("hidden");
+        this.replayRunBtn.textContent = "Retry";
+      }
+      if (this.continueRunBtn) {
+        this.continueRunBtn.classList.toggle("hidden", mode !== "won");
+        this.continueRunBtn.textContent = "Continue";
+      }
+      if (this.mainMenuBtn) {
+        this.mainMenuBtn.classList.remove("hidden");
+      }
+    }
+
+    hideInterludeActions() {
+      this.interludeActions?.classList.add("hidden");
+    }
+
+    countNormalOrbs() {
+      let total = 0;
+      for (const orb of this.levelData.orbCells.values()) {
+        if ((orb.type || "normal") === "normal") {
+          total += 1;
+        }
+      }
+      return total;
     }
 
     updateBoardMetrics() {
@@ -1680,6 +2248,7 @@
       ctx.globalAlpha = sceneAlpha;
       this.drawMaze(ctx);
       this.drawOrbs(ctx);
+      this.drawFreezeWave(ctx);
       this.drawExit(ctx);
       this.drawFocusMask(ctx);
       this.drawImpactEffect(ctx);
@@ -1716,6 +2285,14 @@
         ctx.fillRect(0, 0, width, height);
       }
       this.drawAmbientField(ctx, width, height);
+
+      const freeze = this.getFreezeWaveState();
+      if (freeze.active && freeze.factor > 0.01) {
+        ctx.save();
+        ctx.fillStyle = `rgba(145,0,0,${0.08 + freeze.factor * 0.2})`;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      }
     }
 
     buildBackdropCache(width, height) {
@@ -1844,14 +2421,14 @@
       const rng = new RNG(seed);
       const shards = [];
 
-      for (let i = 0; i < 10; i += 1) {
+      for (let i = 0; i < 18; i += 1) {
         shards.push({
           angle: rng.next() * Math.PI * 2,
-          distance: 0.28 + rng.next() * 0.42,
-          width: 0.08 + rng.next() * 0.08,
-          height: 0.04 + rng.next() * 0.06,
-          spin: (rng.next() - 0.5) * 3.4,
-          delay: rng.next() * 0.16,
+          distance: 0.24 + rng.next() * 0.56,
+          width: 0.06 + rng.next() * 0.1,
+          height: 0.03 + rng.next() * 0.08,
+          spin: (rng.next() - 0.5) * 4.6,
+          delay: rng.next() * 0.24,
         });
       }
 
@@ -1919,10 +2496,25 @@
           const type = this.levelData.grid[y][x];
           const dynamicWall = type === "floor" && this.isDynamicWallCell(x, y);
           const dynamicClosed = dynamicWall && this.isDynamicWallClosed(x, y);
+          const collapseDelta = this.levelTime - this.levelData.collapseAt[y][x];
 
           if (collapsed) {
-            ctx.fillStyle = "rgba(0,0,0,0.94)";
-            ctx.fillRect(px, py, cellSize, cellSize);
+            if (collapseDelta < 0.62) {
+              const p = this.clamp(collapseDelta / 0.62, 0, 1);
+              const coreSize = cellSize * (0.92 - this.easeOut(p) * 0.8);
+              const coreX = px + (cellSize - coreSize) * 0.5;
+              const coreY = py + (cellSize - coreSize) * 0.5;
+              ctx.fillStyle = `rgba(0,0,0,${0.35 + p * 0.55})`;
+              ctx.fillRect(px, py, cellSize, cellSize);
+              ctx.fillStyle = `rgba(255,${Math.floor(120 - p * 90)},${Math.floor(120 - p * 90)},${0.18 + (1 - p) * 0.26})`;
+              ctx.fillRect(coreX, coreY, coreSize, coreSize);
+              ctx.strokeStyle = `rgba(255,255,255,${0.08 + (1 - p) * 0.2})`;
+              ctx.lineWidth = Math.max(1, cellSize * 0.03);
+              ctx.strokeRect(coreX, coreY, coreSize, coreSize);
+            } else {
+              ctx.fillStyle = "rgba(0,0,0,0.94)";
+              ctx.fillRect(px, py, cellSize, cellSize);
+            }
             continue;
           }
 
@@ -1934,7 +2526,13 @@
             continue;
           }
 
-          ctx.fillStyle = warning ? `rgba(255,255,255,${0.06 + pulse * 0.04})` : "rgba(255,255,255,0.028)";
+          const freezeTint = this.getFreezeTintAtCell(x + 0.5, y + 0.5);
+          if (freezeTint > 0.01) {
+            const base = warning ? 0.08 + pulse * 0.04 : 0.04;
+            ctx.fillStyle = `rgba(255,${Math.floor(140 - freezeTint * 105)},${Math.floor(140 - freezeTint * 105)},${base + freezeTint * 0.14})`;
+          } else {
+            ctx.fillStyle = warning ? `rgba(255,255,255,${0.06 + pulse * 0.04})` : "rgba(255,255,255,0.028)";
+          }
           ctx.fillRect(px, py, cellSize, cellSize);
 
           if (dynamicWall) {
@@ -1961,6 +2559,7 @@
       const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
       const pulse = 0.78 + Math.sin(this.levelTime * 3.6) * 0.08;
       const glowStrength = this.performanceProfile.glowStrength;
+      const goldActive = this.orbMultiplierRemaining > 0;
 
       ctx.save();
       ctx.beginPath();
@@ -1975,18 +2574,75 @@
         const position = this.toScreen(orb.x, orb.y);
         const cx = position.x + cellSize / 2;
         const cy = position.y + cellSize / 2;
-        const radius = Math.max(1.9, cellSize * 0.12);
+        const orbType = orb.type || "normal";
+        const special = orbType !== "normal";
+        const radius = special ? Math.max(2.4, cellSize * 0.145) : Math.max(1.9, cellSize * 0.12);
+        const pulseScale = special ? 1.08 : 1;
+        const alphaPulse = 0.76 + Math.sin(this.levelTime * (orbType === "freeze" ? 4.5 : 4)) * 0.12;
+        const freezeTint = this.getFreezeTintAtCell(orb.x + 0.5, orb.y + 0.5);
+        let color = `rgba(255,255,255,${pulse * 0.92})`;
+        let glow = `rgba(255,255,255,${0.45 + glowStrength * 0.55})`;
+        if (goldActive) {
+          color = `rgba(255,245,186,${0.93 + Math.sin(this.levelTime * 3.8) * 0.06})`;
+          glow = "rgba(255,240,180,0.98)";
+        } else if (orbType === "multiplier") {
+          color = `rgba(255,222,90,${alphaPulse})`;
+          glow = "rgba(255,214,86,0.9)";
+        } else if (orbType === "freeze") {
+          color = `rgba(255,92,92,${alphaPulse})`;
+          glow = "rgba(255,92,92,0.9)";
+        }
+        if (!goldActive && freezeTint > 0.01) {
+          color = `rgba(255,${Math.floor(130 - freezeTint * 90)},${Math.floor(130 - freezeTint * 90)},${0.74 + freezeTint * 0.18})`;
+          glow = `rgba(255,78,78,${0.72 + freezeTint * 0.2})`;
+        }
 
         ctx.save();
         if (glowStrength > 0) {
-          ctx.shadowBlur = 10 * glowStrength;
-          ctx.shadowColor = `rgba(255,255,255,${0.45 + glowStrength * 0.55})`;
+          ctx.shadowBlur = (special ? 13 : 10) * glowStrength;
+          ctx.shadowColor = glow;
         }
-        ctx.fillStyle = `rgba(255,255,255,${pulse})`;
+        ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.arc(cx, cy, radius * pulseScale, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    drawFreezeWave(ctx) {
+      const wave = this.getFreezeWaveState();
+      if (!wave.active || !wave.center) {
+        return;
+      }
+
+      const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
+      const centerPos = this.toScreen(wave.center.x, wave.center.y);
+      const centerX = centerPos.x + cellSize / 2;
+      const centerY = centerPos.y + cellSize / 2;
+      const radius = Math.max(0, wave.radiusCells * cellSize);
+      const alpha = this.clamp(0.18 + wave.factor * 0.24, 0, 0.46);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
+      ctx.clip();
+
+      const ring = ctx.createRadialGradient(centerX, centerY, Math.max(0, radius - cellSize * 1.2), centerX, centerY, radius + cellSize * 0.9);
+      ring.addColorStop(0, "rgba(255,80,80,0)");
+      ring.addColorStop(0.62, `rgba(255,64,64,${alpha})`);
+      ring.addColorStop(1, "rgba(255,64,64,0)");
+      ctx.fillStyle = ring;
+      ctx.fillRect(centerX - radius - cellSize * 2, centerY - radius - cellSize * 2, (radius + cellSize * 2) * 2, (radius + cellSize * 2) * 2);
+
+      if (wave.phase === "out" || wave.phase === "back") {
+        ctx.strokeStyle = `rgba(255,180,180,${0.18 + wave.factor * 0.22})`;
+        ctx.lineWidth = Math.max(1, cellSize * 0.03);
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
       ctx.restore();
@@ -2074,6 +2730,7 @@
       const shimmer = (this.levelTime * (0.95 + enterBoost * 1.6)) % 1;
       const glowStrength = this.performanceProfile.glowStrength;
       const reducedEffects = this.performanceProfile.reducedEffects;
+      const freezeTint = this.getFreezeTintAtCell(this.levelData.exit.x + 0.5, this.levelData.exit.y + 0.5);
 
       if (this.isCollapsed(this.levelData.exit.x, this.levelData.exit.y)) {
         return;
@@ -2116,7 +2773,11 @@
         ctx.restore();
       }
 
-      ctx.fillStyle = `rgba(255,255,255,${aura})`;
+      if (freezeTint > 0.01) {
+        ctx.fillStyle = `rgba(255,${Math.floor(124 - freezeTint * 96)},${Math.floor(124 - freezeTint * 96)},${aura + freezeTint * 0.14})`;
+      } else {
+        ctx.fillStyle = `rgba(255,255,255,${aura})`;
+      }
       ctx.fillRect(x + innerInset, y + innerInset, coreWidth, coreHeight);
 
       ctx.save();
@@ -2134,6 +2795,33 @@
       }
 
       ctx.restore();
+
+      if (enterBoost > 0) {
+        const shutterSizeY = (coreHeight * 0.5) * enterBoost;
+        const shutterSizeX = (coreWidth * 0.5) * enterBoost * 0.8;
+        const shutterAlpha = 0.24 + enterBoost * 0.62;
+
+        ctx.save();
+        ctx.fillStyle = `rgba(0,0,0,${shutterAlpha})`;
+        // top and bottom shutters
+        ctx.fillRect(x + innerInset, y + innerInset, coreWidth, shutterSizeY);
+        ctx.fillRect(x + innerInset, y + innerInset + coreHeight - shutterSizeY, coreWidth, shutterSizeY);
+        // left and right shutters for a tighter close
+        ctx.fillRect(x + innerInset, y + innerInset, shutterSizeX, coreHeight);
+        ctx.fillRect(x + innerInset + coreWidth - shutterSizeX, y + innerInset, shutterSizeX, coreHeight);
+        ctx.restore();
+
+        ctx.save();
+        ctx.strokeStyle = `rgba(255,255,255,${0.24 + enterBoost * 0.34})`;
+        ctx.lineWidth = Math.max(1, cellSize * 0.03);
+        ctx.strokeRect(
+          x + innerInset + shutterSizeX,
+          y + innerInset + shutterSizeY,
+          Math.max(0, coreWidth - shutterSizeX * 2),
+          Math.max(0, coreHeight - shutterSizeY * 2)
+        );
+        ctx.restore();
+      }
       ctx.restore();
     }
 
@@ -2152,7 +2840,11 @@
         return;
       }
 
-      if (this.phase === "lost") {
+      if (this.phase === "lost" || this.phase === "won" || this.phase === "exiting") {
+        return;
+      }
+
+      if (this.exitEffect) {
         return;
       }
 
@@ -2161,11 +2853,12 @@
       let scaleY = 1;
       let offsetX = 0;
       let offsetY = 0;
+      const motionProfile = this.getShapeMotionProfile(this.playerShape);
 
       if (this.moveState) {
         const envelope = this.smoothPulse(this.moveState.progress);
-        const stretch = 1 + envelope * 0.09;
-        const squeeze = 1 - envelope * 0.045;
+        const stretch = 1 + envelope * motionProfile.moveStretch;
+        const squeeze = 1 - envelope * motionProfile.moveSqueeze;
         scaleX = this.moveState.dx !== 0 ? stretch : squeeze;
         scaleY = this.moveState.dy !== 0 ? stretch : squeeze;
         if (this.moveState.dx === 0) {
@@ -2181,21 +2874,15 @@
         const burst = this.springOut(impactProgress) * this.impactEffect.strength;
         offsetX -= this.impactEffect.dx * cellSize * 0.06 * burst;
         offsetY -= this.impactEffect.dy * cellSize * 0.06 * burst;
+        const squashStrength = motionProfile.collisionSquash;
+        const stretchStrength = motionProfile.collisionStretch;
         if (this.impactEffect.dx !== 0) {
-          scaleX *= 1 - burst * 0.18;
-          scaleY *= 1 + burst * 0.12;
+          scaleX *= 1 - burst * squashStrength;
+          scaleY *= 1 + burst * stretchStrength;
         } else {
-          scaleY *= 1 - burst * 0.18;
-          scaleX *= 1 + burst * 0.12;
+          scaleY *= 1 - burst * squashStrength;
+          scaleX *= 1 + burst * stretchStrength;
         }
-      }
-
-      if (this.exitEffect) {
-        const enter = this.easeInOutSine(this.exitEffect.time / this.exitEffect.duration);
-        const collapse = 1 - enter * 0.72;
-        scaleX *= collapse;
-        scaleY *= collapse;
-        pulse += enter * 0.12;
       }
 
       const width = size * scaleX;
@@ -2242,32 +2929,226 @@
       ctx.beginPath();
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
+      const freezeTint = this.getFreezeTintAtCell(this.player.renderX + 0.5, this.player.renderY + 0.5);
+      const goldActive = this.orbMultiplierRemaining > 0;
       if (glowStrength > 0) {
         const auraRadius = Math.max(width, height) * (1.45 + auraPulse * 0.22);
         const aura = ctx.createRadialGradient(centerX + offsetX, centerY + offsetY, 0, centerX + offsetX, centerY + offsetY, auraRadius);
-        aura.addColorStop(0, `rgba(255,255,255,${0.2 + glowStrength * 0.14})`);
-        aura.addColorStop(0.38, `rgba(255,255,255,${0.09 + glowStrength * 0.08})`);
+        const auraR = 255;
+        const auraG = freezeTint > 0.01 ? Math.floor(112 - freezeTint * 46) : (goldActive ? 208 : 255);
+        const auraB = freezeTint > 0.01 ? Math.floor(112 - freezeTint * 46) : (goldActive ? 64 : 255);
+        aura.addColorStop(0, `rgba(${auraR},${auraG},${auraB},${0.2 + glowStrength * 0.14})`);
+        aura.addColorStop(0.38, `rgba(${auraR},${auraG},${auraB},${0.09 + glowStrength * 0.08})`);
         aura.addColorStop(1, "rgba(255,255,255,0)");
         ctx.fillStyle = aura;
         ctx.fillRect(centerX + offsetX - auraRadius, centerY + offsetY - auraRadius, auraRadius * 2, auraRadius * 2);
       }
       if (glowStrength > 0) {
         ctx.shadowBlur = 16 * glowStrength;
-        ctx.shadowColor = `rgba(255,255,255,${0.52 + glowStrength * 0.48})`;
+        if (freezeTint > 0.01) {
+          ctx.shadowColor = `rgba(255,76,76,${0.68 + glowStrength * 0.3})`;
+        } else if (goldActive) {
+          ctx.shadowColor = `rgba(255,214,88,${0.62 + glowStrength * 0.38})`;
+        } else {
+          ctx.shadowColor = `rgba(255,255,255,${0.52 + glowStrength * 0.48})`;
+        }
       }
-      ctx.fillStyle = `rgba(255,255,255,${pulse})`;
-      ctx.fillRect(px, py, width, height);
+      if (freezeTint > 0.01) {
+        ctx.fillStyle = `rgba(255,${Math.floor(112 - freezeTint * 44)},${Math.floor(112 - freezeTint * 44)},${pulse})`;
+      } else if (goldActive) {
+        ctx.fillStyle = `rgba(255,216,72,${pulse})`;
+      } else {
+        ctx.fillStyle = `rgba(255,255,255,${pulse})`;
+      }
+      this.drawShapeByType(ctx, this.playerShape, px, py, width, height, centerX + offsetX, centerY + offsetY);
       ctx.restore();
+    }
+
+    getShapeMotionProfile(shape) {
+      const defaults = {
+        moveStretch: 0.09,
+        moveSqueeze: 0.045,
+        collisionSquash: 0.18,
+        collisionStretch: 0.12
+      };
+      const profiles = {
+        square: defaults,
+        triangle: { moveStretch: 0.1, moveSqueeze: 0.05, collisionSquash: 0.17, collisionStretch: 0.12 },
+        circle: { moveStretch: 0.11, moveSqueeze: 0.055, collisionSquash: 0.3, collisionStretch: 0.22 },
+        diamond: { moveStretch: 0.1, moveSqueeze: 0.052, collisionSquash: 0.2, collisionStretch: 0.13 },
+        hex: { moveStretch: 0.084, moveSqueeze: 0.04, collisionSquash: 0.16, collisionStretch: 0.11 },
+        star: { moveStretch: 0.12, moveSqueeze: 0.06, collisionSquash: 0.22, collisionStretch: 0.16 },
+        capsule: { moveStretch: 0.125, moveSqueeze: 0.066, collisionSquash: 0.26, collisionStretch: 0.18 },
+        cross: { moveStretch: 0.082, moveSqueeze: 0.04, collisionSquash: 0.19, collisionStretch: 0.14 },
+        droplet: { moveStretch: 0.11, moveSqueeze: 0.05, collisionSquash: 0.24, collisionStretch: 0.17 }
+      };
+      return profiles[shape] || defaults;
+    }
+
+    drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY) {
+      if (shape === "circle") {
+        this.drawCircleShape(ctx, px, py, width, height);
+      } else if (shape === "triangle") {
+        this.drawTriangleShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "diamond") {
+        this.drawDiamondShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "hex") {
+        this.drawRegularPolygon(ctx, centerX, centerY, Math.min(width, height) * 0.58, 6, this.levelTime * 0.6);
+      } else if (shape === "star") {
+        this.drawStarShape(ctx, centerX, centerY, Math.min(width, height) * 0.62, this.levelTime * 1.2);
+      } else if (shape === "capsule") {
+        this.drawCapsuleShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "cross") {
+        this.drawCrossShape(ctx, centerX, centerY, width, height, this.levelTime * 0.5);
+      } else if (shape === "droplet") {
+        this.drawDropletShape(ctx, centerX, centerY, width, height);
+      } else {
+        this.drawSquareShape(ctx, px, py, width, height);
+      }
+    }
+
+    drawSquareShape(ctx, px, py, width, height) {
+      ctx.fillRect(px, py, width, height);
+    }
+
+    drawCircleShape(ctx, px, py, width, height) {
+      ctx.beginPath();
+      ctx.ellipse(px + width / 2, py + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    drawTriangleShape(ctx, centerX, centerY, width, height) {
+      const travel = this.moveState
+        ? { dx: this.moveState.dx, dy: this.moveState.dy }
+        : (this.impactEffect ? { dx: this.impactEffect.dx, dy: this.impactEffect.dy } : this.lastMoveDirection);
+      const magnitude = Math.hypot(travel.dx, travel.dy) || 1;
+      const dirX = travel.dx / magnitude;
+      const dirY = travel.dy / magnitude;
+      const perpX = -dirY;
+      const perpY = dirX;
+      const wobble = this.moveState ? Math.sin(this.triangleSpinTime) * 0.22 : 0;
+      const sin = Math.sin(wobble);
+      const cos = Math.cos(wobble);
+      const basisDirX = dirX * cos - dirY * sin;
+      const basisDirY = dirX * sin + dirY * cos;
+      const basisPerpX = -basisDirY;
+      const basisPerpY = basisDirX;
+      const halfBase = width * 0.52;
+      const tipLen = height * 0.62;
+      const baseLen = height * 0.42;
+      const baseCenterX = centerX + basisDirX * baseLen;
+      const baseCenterY = centerY + basisDirY * baseLen;
+      const tipX = centerX - basisDirX * tipLen;
+      const tipY = centerY - basisDirY * tipLen;
+      const leftX = baseCenterX + basisPerpX * halfBase;
+      const leftY = baseCenterY + basisPerpY * halfBase;
+      const rightX = baseCenterX - basisPerpX * halfBase;
+      const rightY = baseCenterY - basisPerpY * halfBase;
+
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(leftX, leftY);
+      ctx.lineTo(rightX, rightY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawDiamondShape(ctx, centerX, centerY, width, height) {
+      const spin = this.moveState ? this.levelTime * 4.2 : this.levelTime * 1.7;
+      const rx = width * 0.5;
+      const ry = height * 0.5;
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(Math.PI / 4 + spin * 0.05);
+      ctx.fillRect(-rx * 0.76, -ry * 0.76, rx * 1.52, ry * 1.52);
+      ctx.restore();
+    }
+
+    drawRegularPolygon(ctx, centerX, centerY, radius, sides, rotation = 0) {
+      ctx.beginPath();
+      for (let i = 0; i < sides; i += 1) {
+        const angle = rotation + (i / sides) * Math.PI * 2 - Math.PI / 2;
+        const x = centerX + Math.cos(angle) * radius;
+        const y = centerY + Math.sin(angle) * radius;
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawStarShape(ctx, centerX, centerY, radius, spin) {
+      const inner = radius * 0.46;
+      const points = 5;
+      ctx.beginPath();
+      for (let i = 0; i < points * 2; i += 1) {
+        const angle = spin + (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+        const r = i % 2 === 0 ? radius : inner;
+        const x = centerX + Math.cos(angle) * r;
+        const y = centerY + Math.sin(angle) * r;
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawCapsuleShape(ctx, centerX, centerY, width, height) {
+      const horizontal = Math.abs(this.lastMoveDirection.dx) >= Math.abs(this.lastMoveDirection.dy);
+      const bodyW = horizontal ? width * 1.1 : width * 0.84;
+      const bodyH = horizontal ? height * 0.78 : height * 1.12;
+      const radius = Math.min(bodyW, bodyH) * 0.5;
+      ctx.beginPath();
+      ctx.roundRect(centerX - bodyW / 2, centerY - bodyH / 2, bodyW, bodyH, radius);
+      ctx.fill();
+    }
+
+    drawCrossShape(ctx, centerX, centerY, width, height, spin) {
+      const arm = Math.min(width, height) * 0.26;
+      const len = Math.min(width, height) * 0.92;
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(spin);
+      ctx.fillRect(-arm / 2, -len / 2, arm, len);
+      ctx.fillRect(-len / 2, -arm / 2, len, arm);
+      ctx.restore();
+    }
+
+    drawDropletShape(ctx, centerX, centerY, width, height) {
+      const wobble = this.moveState ? Math.sin(this.levelTime * 8.2) * 0.14 : Math.sin(this.levelTime * 2.8) * 0.05;
+      const stretchY = height * (1.08 + wobble);
+      const stretchX = width * (0.84 - wobble * 0.35);
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY - stretchY * 0.62);
+      ctx.bezierCurveTo(
+        centerX + stretchX * 0.7, centerY - stretchY * 0.34,
+        centerX + stretchX * 0.76, centerY + stretchY * 0.24,
+        centerX, centerY + stretchY * 0.62
+      );
+      ctx.bezierCurveTo(
+        centerX - stretchX * 0.76, centerY + stretchY * 0.24,
+        centerX - stretchX * 0.7, centerY - stretchY * 0.34,
+        centerX, centerY - stretchY * 0.62
+      );
+      ctx.closePath();
+      ctx.fill();
     }
 
     drawPlayerDeath(ctx, centerX, centerY, size, frameX, frameY, viewportWidth, viewportHeight, cellSize) {
       const progress = this.clamp(this.deathEffect.time / this.deathEffect.duration, 0, 1);
-      const implode = this.easeInOutSine(Math.min(1, progress * 1.08));
+      const implode = this.easeInOutCubic(Math.min(1, progress * 1.08));
       const flash = 1 - progress;
       const coreScale = 1 - implode * 0.92;
       const coreSize = Math.max(cellSize * 0.045, size * coreScale);
-      const ringRadius = cellSize * (0.08 + progress * 0.44);
-      const wellRadius = cellSize * (0.16 + progress * 0.38);
+      const ringRadius = cellSize * (0.08 + progress * 0.6);
+      const outerRingRadius = cellSize * (0.16 + progress * 0.92);
+      const wellRadius = cellSize * (0.16 + progress * 0.5);
       const reducedEffects = this.performanceProfile.reducedEffects;
       const glowStrength = this.performanceProfile.glowStrength;
 
@@ -2304,6 +3185,11 @@
       ctx.beginPath();
       ctx.arc(centerX, centerY, ringRadius, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.strokeStyle = `rgba(255,255,255,${0.08 + flash * 0.18})`;
+      ctx.lineWidth = Math.max(1, cellSize * 0.02);
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, outerRingRadius, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.restore();
 
       for (const shard of this.deathEffect.shards) {
@@ -2324,6 +3210,17 @@
         ctx.rotate(shard.angle + shard.spin * local);
         ctx.fillStyle = `rgba(255,255,255,${alpha})`;
         ctx.fillRect(-width / 2, -height / 2, width, height);
+        ctx.restore();
+      }
+
+      const shockAlpha = (1 - progress) * 0.22;
+      if (shockAlpha > 0.01) {
+        ctx.save();
+        ctx.strokeStyle = `rgba(255,255,255,${shockAlpha})`;
+        ctx.lineWidth = Math.max(1, cellSize * 0.028);
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, cellSize * (0.18 + progress * 1.25), 0, Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
       }
 
@@ -2352,8 +3249,9 @@
       const centerX = playerPos.x + cellSize / 2;
       const centerY = playerPos.y + cellSize / 2;
       const intro = this.clamp(this.introFocusTime / BASE_CONFIG.introFocusDuration, 0, 1);
-      const innerRadius = cellSize * (0.88 + intro * 0.14);
-      const outerRadius = Math.max(viewportWidth, viewportHeight) * (0.24 + (1 - intro) * 0.07);
+      const freezeFocus = this.clamp(this.collapseFreezeRemaining / 4, 0, 1);
+      const innerRadius = cellSize * (0.88 + intro * 0.14) * (1 - freezeFocus * 0.18);
+      const outerRadius = Math.max(viewportWidth, viewportHeight) * (0.24 + (1 - intro) * 0.07) * (1 - freezeFocus * 0.12);
       const gradient = ctx.createRadialGradient(
         centerX,
         centerY,
@@ -2362,9 +3260,9 @@
         centerY,
         outerRadius
       );
-      gradient.addColorStop(0, `rgba(0,0,0,${0.02 + intro * 0.04})`);
-      gradient.addColorStop(0.36, `rgba(0,0,0,${0.24 + intro * 0.18})`);
-      gradient.addColorStop(1, `rgba(0,0,0,${0.82 + intro * 0.08})`);
+      gradient.addColorStop(0, `rgba(0,0,0,${0.02 + intro * 0.04 + freezeFocus * 0.06})`);
+      gradient.addColorStop(0.36, `rgba(0,0,0,${0.24 + intro * 0.18 + freezeFocus * 0.2})`);
+      gradient.addColorStop(1, `rgba(0,0,0,${0.82 + intro * 0.08 + freezeFocus * 0.12})`);
 
       ctx.save();
       ctx.beginPath();
@@ -2377,9 +3275,9 @@
 
     drawWinOverlay(ctx, width, height) {
       const progress = this.easeOut(this.clamp(this.winOverlayTime / 0.5, 0, 1));
-      const pulse = 0.78 + Math.sin((this.levelTime + this.winOverlayTime) * 4.2) * 0.08;
-      const prompt = this.isCoarsePointer() ? "Tap for the next level" : "Press for the next level";
       const title = `Level ${String(this.level).padStart(2, "0")} complete`;
+      const runLabel = `Run: ${this.formatTime(this.currentRunTimeMs)}`;
+      const topLabel = `Top ${this.topRecord.name}: ${this.formatTime(this.topRecord.timeMs)}`;
       const { frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
 
       ctx.save();
@@ -2387,7 +3285,7 @@
       ctx.fillRect(0, 0, width, height);
 
       const cardWidth = Math.min(viewportWidth * 0.82, 420);
-      const cardHeight = Math.min(viewportHeight * 0.32, 180);
+      const cardHeight = Math.min(viewportHeight * 0.34, 200);
       const cardX = frameX + (viewportWidth - cardWidth) / 2;
       const cardY = frameY + (viewportHeight - cardHeight) / 2;
       const translateY = (1 - progress) * 16;
@@ -2416,18 +3314,19 @@
       ctx.textBaseline = "middle";
       ctx.fillStyle = `rgba(255,255,255,${0.78 + progress * 0.18})`;
       ctx.font = `700 ${Math.max(16, Math.min(28, cardWidth * 0.065))}px ${this.getDisplayFont()}`;
-      ctx.fillText(title, cardX + cardWidth / 2, cardY + cardHeight * 0.34);
+      ctx.fillText(title, cardX + cardWidth / 2, cardY + cardHeight * 0.24);
 
-      ctx.fillStyle = `rgba(255,255,255,${0.54 + pulse * 0.18})`;
-      ctx.font = `600 ${Math.max(12, Math.min(19, cardWidth * 0.045))}px ${this.getUiFont()}`;
-      ctx.fillText(prompt, cardX + cardWidth / 2, cardY + cardHeight * 0.63);
+      ctx.fillStyle = `rgba(255,255,255,${0.66 + progress * 0.14})`;
+      ctx.font = `600 ${Math.max(11, Math.min(17, cardWidth * 0.04))}px ${this.getUiFont()}`;
+      ctx.fillText(runLabel, cardX + cardWidth / 2, cardY + cardHeight * 0.52);
+      ctx.fillText(topLabel, cardX + cardWidth / 2, cardY + cardHeight * 0.67);
 
       const lineWidth = cardWidth * 0.34;
-      ctx.strokeStyle = `rgba(255,255,255,${0.18 + pulse * 0.18})`;
+      ctx.strokeStyle = `rgba(255,255,255,${0.26 + progress * 0.12})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(cardX + (cardWidth - lineWidth) / 2, cardY + cardHeight * 0.78);
-      ctx.lineTo(cardX + (cardWidth + lineWidth) / 2, cardY + cardHeight * 0.78);
+      ctx.moveTo(cardX + (cardWidth - lineWidth) / 2, cardY + cardHeight * 0.8);
+      ctx.lineTo(cardX + (cardWidth + lineWidth) / 2, cardY + cardHeight * 0.8);
       ctx.stroke();
       ctx.restore();
     }
@@ -2880,6 +3779,10 @@
     }
 
     setStatusText(fullText, compactText = fullText) {
+      if (!this.isTutorialRun && !this.isMenuDemo) {
+        this.statusText.textContent = "";
+        return;
+      }
       this.statusText.textContent = this.isCompactViewport() ? compactText : fullText;
     }
 

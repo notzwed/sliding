@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https:; font-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; upgrade-insecure-requests">
+  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=()">
   <meta name="theme-color" content="#020202">
   <meta name="application-name" content="Slidey">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -31,6 +34,10 @@
         <span class="hud-label">Orbs</span>
         <strong id="orbValue">00 / 00</strong>
       </div>
+      <div class="hud-block hud-right">
+        <span class="hud-label">Time</span>
+        <strong id="timerValue">00:00.00</strong>
+      </div>
     </div>
 
     <main class="game-stage">
@@ -40,6 +47,12 @@
         <p id="messageTitle" class="message-title"></p>
         <p id="messageText" class="message-text"></p>
       </div>
+
+      <div id="interludeActions" class="interlude-actions hidden">
+        <button id="replayRunBtn" class="interlude-button" type="button">Retry</button>
+        <button id="continueRunBtn" class="interlude-button interlude-button-primary" type="button">Continue</button>
+        <button id="mainMenuBtn" class="interlude-button" type="button">Main</button>
+      </div>
     </main>
 
     <div class="footer-bar">
@@ -47,9 +60,89 @@
         <span class="hud-label">Wallet</span>
         <strong id="runValue">00</strong>
       </div>
-      <p id="statusText" class="status-text">Swipe or use WASD / arrow keys. Collect as many orbs as possible and escape through the exit.</p>
+      <p id="statusText" class="status-text"></p>
     </div>
 
+  </div>
+
+  <div id="startMenu" class="start-menu" aria-hidden="false">
+    <h1 class="menu-title" aria-label="SLIDEY">
+      <span class="glitch-letter" data-char="S">S</span>
+      <span class="glitch-letter" data-char="L">L</span>
+      <span class="glitch-letter" data-char="I">I</span>
+      <span class="glitch-letter" data-char="D">D</span>
+      <span class="glitch-letter" data-char="E">E</span>
+      <span class="glitch-letter" data-char="Y">Y</span>
+    </h1>
+    <div class="menu-actions">
+      <button id="startRunBtn" class="menu-button menu-button-primary" type="button">Start</button>
+      <button id="storeBtn" class="menu-button" type="button">Shop</button>
+    </div>
+    <p class="menu-best-time">Best Time <strong id="bestTimeValue">--:--.--</strong></p>
+    <p class="menu-orbs">Orbs Collected <strong id="menuOrbsValue">00</strong></p>
+    <button id="tutorialBtn" class="tutorial-button" type="button" aria-label="Apri tutorial">?</button>
+  </div>
+
+  <div id="shopMenu" class="shop-menu hidden" aria-hidden="true">
+    <h2 class="shop-title">SHOP</h2>
+    <p class="shop-wallet">Orbs <strong id="shopOrbsValue">00</strong></p>
+    <div class="shop-grid">
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-square" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Square</h3>
+        <p class="shop-item-price">Owned</p>
+        <button id="shapeSquareBtn" class="shop-button" type="button" data-shape="square">Select</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-triangle" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Triangle</h3>
+        <p class="shop-item-price">60 orbs</p>
+        <button id="shapeTriangleBtn" class="shop-button" type="button" data-shape="triangle" data-cost="60">Buy</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-circle" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Circle</h3>
+        <p class="shop-item-price">90 orbs</p>
+        <button id="shapeCircleBtn" class="shop-button" type="button" data-shape="circle" data-cost="90">Buy</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-diamond" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Diamond</h3>
+        <p class="shop-item-price">130 orbs</p>
+        <button class="shop-button" type="button" data-shape="diamond" data-cost="130">Buy</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-hex" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Hex</h3>
+        <p class="shop-item-price">170 orbs</p>
+        <button class="shop-button" type="button" data-shape="hex" data-cost="170">Buy</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-star" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Star</h3>
+        <p class="shop-item-price">220 orbs</p>
+        <button class="shop-button" type="button" data-shape="star" data-cost="220">Buy</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-capsule" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Capsule</h3>
+        <p class="shop-item-price">280 orbs</p>
+        <button class="shop-button" type="button" data-shape="capsule" data-cost="280">Buy</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-cross" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Cross</h3>
+        <p class="shop-item-price">350 orbs</p>
+        <button class="shop-button" type="button" data-shape="cross" data-cost="350">Buy</button>
+      </article>
+      <article class="shop-card">
+        <div class="shape-preview shape-preview-droplet" aria-hidden="true"></div>
+        <h3 class="shop-item-title">Droplet</h3>
+        <p class="shop-item-price">430 orbs</p>
+        <button class="shop-button" type="button" data-shape="droplet" data-cost="430">Buy</button>
+      </article>
+    </div>
+    <button id="closeShopBtn" class="shop-close" type="button">Back</button>
   </div>
 
   <div id="installGate" class="install-gate hidden" aria-hidden="true">
