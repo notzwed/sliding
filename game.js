@@ -47,7 +47,6 @@
       this.levelValue = document.getElementById("levelValue");
       this.orbValue = document.getElementById("orbValue");
       this.timerValue = document.getElementById("timerValue");
-      this.levelTopValue = document.getElementById("levelTopValue");
       this.runValue = document.getElementById("runValue");
       this.statusText = document.getElementById("statusText");
       this.dangerFill = document.getElementById("dangerFill");
@@ -380,7 +379,6 @@
       this.hideMessage();
       this.hideInterludeActions();
       this.levelValue.textContent = String(this.level).padStart(2, "0");
-      this.refreshLevelTopHud();
       this.updateBoardMetrics();
       this.resetCamera();
       window.dispatchEvent(new CustomEvent("slidey:level-started", {
@@ -2473,7 +2471,6 @@
       if (this.timerValue) {
         this.timerValue.textContent = this.formatTime(this.currentRunTimeMs);
       }
-      this.refreshLevelTopHud();
       const ratio = this.clamp(this.levelTime / this.levelData.maxCollapseTime, 0, 1);
       this.dangerFill.style.width = `${ratio * 100}%`;
     }
@@ -2487,17 +2484,6 @@
         timeMs: Math.floor(timeMs),
         holderName: typeof holderName === "string" && holderName.trim() ? holderName.trim() : "Top"
       });
-      if (lv === this.level) {
-        this.refreshLevelTopHud();
-      }
-    }
-
-    refreshLevelTopHud() {
-      if (!this.levelTopValue) {
-        return;
-      }
-      const record = this.levelTopRecords.get(this.level);
-      this.levelTopValue.textContent = record ? this.formatTime(record.timeMs) : "--:--.--";
     }
 
     showMessage(title, text) {
@@ -3769,7 +3755,10 @@
       const progress = this.easeOut(this.clamp(this.winOverlayTime / 0.5, 0, 1));
       const title = `Level ${String(this.level).padStart(2, "0")} complete`;
       const runLabel = `Run: ${this.formatTime(this.currentRunTimeMs)}`;
-      const topLabel = `Top ${this.topRecord.name}: ${this.formatTime(this.topRecord.timeMs)}`;
+      const levelTop = this.levelTopRecords.get(this.level);
+      const topLabel = levelTop
+        ? `Level ${String(this.level).padStart(2, "0")} Top: ${this.formatTime(levelTop.timeMs)}`
+        : `Level ${String(this.level).padStart(2, "0")} Top: --:--.--`;
       const { frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
 
       ctx.save();
