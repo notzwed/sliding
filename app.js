@@ -4,12 +4,14 @@
   const GUEST_WALLET_KEY = "slidey_wallet";
   const GUEST_LEVEL_KEY = "slidey_highest_level";
   const BEST_TIME_KEY = "slidey_best_time_ms";
+  const LEVEL_TOP_CACHE_KEY = "slidey_level_top_cache";
   const TUTORIAL_COMPLETED_KEY = "slidey_tutorial_completed";
   const UNLOCKED_SHAPES_KEY = "slidey_unlocked_shapes";
   const SELECTED_SHAPE_KEY = "slidey_selected_shape";
   const DEVICE_ID_KEY = "slidey_device_id";
   const REMOTE_TABLE = "player_profiles";
   const CHALLENGE_TABLE = "challenge_presence";
+  const LEVEL_RECORDS_TABLE = "level_records";
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
@@ -59,6 +61,7 @@
   let tutorialCompleted = false;
   let selectedShape = "square";
   let unlockedShapes = new Set(["square"]);
+  let levelTopCache = {};
   let challengePushTimer = null;
   let challengePullTimer = null;
   let challengeCountdownTimer = null;
@@ -130,6 +133,51 @@
     if (shopOrbsValue) {
       shopOrbsValue.textContent = String(walletOrbs).padStart(2, "0");
     }
+  };
+
+  const readLevelTopCache = () => {
+    const raw = window.localStorage.getItem(LEVEL_TOP_CACHE_KEY);
+    if (!raw) {
+      return {};
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return {};
+      }
+      return parsed;
+    } catch (_error) {
+      return {};
+    }
+  };
+
+  const persistLevelTopCache = () => {
+    window.localStorage.setItem(LEVEL_TOP_CACHE_KEY, JSON.stringify(levelTopCache));
+  };
+
+  const getPlayerAlias = () => {
+    const tail = deviceId.slice(-4).toUpperCase();
+    return `P-${tail}`;
+  };
+
+  const applyLevelTopToGame = (level) => {
+    const key = String(Math.max(1, readNumber(level, 1)));
+    const record = levelTopCache[key];
+    if (!record || !window.__slideyGame?.setLevelTopRecord) {
+      return;
+    }
+    window.__slideyGame.setLevelTopRecord(Number(key), readNumber(record.timeMs, 0), record.name || "Top");
+  };
+
+  const cacheLevelTop = (level, timeMs, name = "Top") => {
+    const lv = Math.max(1, readNumber(level, 1));
+    const t = Math.max(1, readNumber(timeMs, 0));
+    if (!t) {
+      return;
+    }
+    levelTopCache[String(lv)] = { timeMs: t, name };
+    persistLevelTopCache();
+    applyLevelTopToGame(lv);
   };
 
   const readUnlockedShapes = () => {
@@ -749,6 +797,7 @@
     applyProgressToGame();
     applyShapeToGame();
     window.__slideyGame.enterMenuDemo();
+    void ensureLevelTopForLevel(window.__slideyGame.level || 1);
     const bestMs = typeof window.__slideyGame.getBestTimeMs === "function"
       ? window.__slideyGame.getBestTimeMs()
       : readNumber(window.localStorage.getItem(BEST_TIME_KEY), 0);
@@ -981,6 +1030,81 @@
     });
   };
 
+  const fetchLevelTopRecord = async (level) => {
+    const lv = Math.max(1, readNumber(level, 1));
+    if (!supabaseClient) {
+      const cached = levelTopCache[String(lv)] || null;
+      return cached ? { level: lv, best_time_ms: readNumber(cached.timeMs, 0), holder_name: cached.name || "Top" } : null;
+    }
+    const { data, error } = await supabaseClient
+      .from(LEVEL_RECORDS_TABLE)
+      .select("level,best_time_ms,holder_name")
+      .eq("level", lv)
+      .single();
+
+    if (error) {
+      if (error.code === "PGRST116" || error.code === "42P01") {
+        const cached = levelTopCache[String(lv)] || null;
+        return cached ? { level: lv, best_time_ms: readNumber(cached.timeMs, 0), holder_name: cached.name || "Top" } : null;
+      }
+      return null;
+    }
+    if (!data) {
+      return null;
+    }
+    return data;
+  };
+
+  const ensureLevelTopForLevel = async (level) => {
+    const lv = Math.max(1, readNumber(level, 1));
+    const record = await fetchLevelTopRecord(lv);
+    if (!record) {
+      applyLevelTopToGame(lv);
+      return;
+    }
+    const timeMs = Math.max(1, readNumber(record.best_time_ms, 0));
+    if (!timeMs) {
+      return;
+    }
+    cacheLevelTop(lv, timeMs, record.holder_name || "Top");
+  };
+
+  const maybeUpdateLevelTopRecord = async (level, timeMs) => {
+    const lv = Math.max(1, readNumber(level, 1));
+    const currentTime = Math.max(1, readNumber(timeMs, 0));
+    if (!currentTime) {
+      return;
+    }
+    const cached = levelTopCache[String(lv)];
+    const cachedTime = cached ? readNumber(cached.timeMs, 0) : 0;
+    if (cachedTime > 0 && currentTime >= cachedTime) {
+      return;
+    }
+
+    if (!supabaseClient) {
+      cacheLevelTop(lv, currentTime, getPlayerAlias());
+      return;
+    }
+
+    const existing = await fetchLevelTopRecord(lv);
+    const existingTime = existing ? readNumber(existing.best_time_ms, 0) : 0;
+    if (existingTime > 0 && currentTime >= existingTime) {
+      cacheLevelTop(lv, existingTime, existing.holder_name || "Top");
+      return;
+    }
+
+    const payload = {
+      level: lv,
+      best_time_ms: currentTime,
+      holder_name: getPlayerAlias(),
+      holder_device_id: deviceId
+    };
+    const { error } = await supabaseClient.from(LEVEL_RECORDS_TABLE).upsert(payload, { onConflict: "level" });
+    if (!error) {
+      cacheLevelTop(lv, currentTime, payload.holder_name);
+    }
+  };
+
   const fetchRemoteProfile = async () => {
     const { data, error } = await supabaseClient
       .from(REMOTE_TABLE)
@@ -1048,6 +1172,7 @@
     walletOrbs = Math.max(0, readNumber(window.localStorage.getItem(GUEST_WALLET_KEY), 0));
     highestLevel = Math.max(1, readNumber(window.localStorage.getItem(GUEST_LEVEL_KEY), 1));
     tutorialCompleted = window.localStorage.getItem(TUTORIAL_COMPLETED_KEY) === "1";
+    levelTopCache = readLevelTopCache();
     unlockedShapes = readUnlockedShapes();
     const storedShape = window.localStorage.getItem(SELECTED_SHAPE_KEY);
     selectedShape = unlockedShapes.has(storedShape) && ALLOWED_SHAPES.has(storedShape) ? storedShape : "square";
@@ -1118,6 +1243,17 @@
     hideChallengeMenu();
     hideChallengeResultScreen();
     showStartMenu();
+  });
+  window.addEventListener("slidey:level-started", (event) => {
+    const level = readNumber(event.detail?.level, 1);
+    void ensureLevelTopForLevel(level);
+  });
+  window.addEventListener("slidey:level-completed-time", (event) => {
+    const level = readNumber(event.detail?.level, 1);
+    const timeMs = readNumber(event.detail?.timeMs, 0);
+    if (timeMs > 0) {
+      void maybeUpdateLevelTopRecord(level, timeMs);
+    }
   });
 
   window.addEventListener("beforeinstallprompt", (event) => {

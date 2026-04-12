@@ -47,6 +47,7 @@
       this.levelValue = document.getElementById("levelValue");
       this.orbValue = document.getElementById("orbValue");
       this.timerValue = document.getElementById("timerValue");
+      this.levelTopValue = document.getElementById("levelTopValue");
       this.runValue = document.getElementById("runValue");
       this.statusText = document.getElementById("statusText");
       this.dangerFill = document.getElementById("dangerFill");
@@ -70,6 +71,7 @@
       this.playerShape = "square";
       this.bestTimeMs = this.readStoredNumber(BEST_TIME_KEY, 0);
       this.topRecord = this.loadTopRecord();
+      this.levelTopRecords = new Map();
       this.currentRunTimeMs = 0;
       this.runClockTime = 0;
       this.lastRunBeatTop = false;
@@ -378,8 +380,12 @@
       this.hideMessage();
       this.hideInterludeActions();
       this.levelValue.textContent = String(this.level).padStart(2, "0");
+      this.refreshLevelTopHud();
       this.updateBoardMetrics();
       this.resetCamera();
+      window.dispatchEvent(new CustomEvent("slidey:level-started", {
+        detail: { level: this.level }
+      }));
       if (tutorial) {
         this.setStatusText("", "");
         this.startTutorialFlowForStage(this.tutorialStage);
@@ -465,7 +471,10 @@
           orbs: [
             { x: 5, y: 9, type: "normal" },
             { x: 7, y: 3, type: "normal" }
-          ]
+          ],
+          checkpoints: {
+            reach_stage1_corner: { x: 3, y: 3 }
+          }
         },
         {
           floorCells: [
@@ -479,7 +488,10 @@
           orbs: [
             { x: 5, y: 7, type: "freeze" },
             { x: 7, y: 5, type: "normal" }
-          ]
+          ],
+          checkpoints: {
+            reach_stage2_mid: { x: 9, y: 5 }
+          }
         },
         {
           floorCells: [
@@ -494,7 +506,11 @@
             { x: 6, y: 8, type: "multiplier" },
             { x: 8, y: 6, type: "normal" },
             { x: 9, y: 5, type: "normal" }
-          ]
+          ],
+          checkpoints: {
+            reach_stage3_branch: { x: 6, y: 8 },
+            reach_stage3_lane: { x: 8, y: 6 }
+          }
         }
       ];
       const config = layouts[this.clamp(stage, 0, layouts.length - 1)];
@@ -539,7 +555,8 @@
         slideGraph,
         slideAnalysis,
         dynamicWallMap: new Map(),
-        maxCollapseTime: 120
+        maxCollapseTime: 120,
+        tutorialCheckpoints: config.checkpoints || {}
       };
     }
 
@@ -548,17 +565,21 @@
         [
           { text: "Hi, I am Slidey. Tap Next to continue." },
           { text: "Core mechanic: swipe once and slide until a wall stops you.", waitFor: "move" },
+          { text: "Follow the route and reach the upper corner.", waitFor: "reach_stage1_corner" },
           { text: "Good. Now collect one white orb.", waitFor: "collect_normal" },
           { text: "Nice. Reach the gate to finish tutorial stage one.", waitFor: "complete_stage" }
         ],
         [
           { text: "Tutorial 2: this route teaches the red orb." },
+          { text: "First, reach the middle lane on the right side.", waitFor: "reach_stage2_mid" },
           { text: "Collect the red orb: collapse freezes for 4 seconds.", waitFor: "collect_freeze" },
           { text: "Use that window and close the gate.", waitFor: "complete_stage" }
         ],
         [
           { text: "Tutorial 3: yellow orb gives time bonus and orb multiplier." },
+          { text: "Move into the side branch.", waitFor: "reach_stage3_branch" },
           { text: "Collect the yellow orb.", waitFor: "collect_multiplier" },
+          { text: "Return to the lane and stabilize your path.", waitFor: "reach_stage3_lane" },
           { text: "Now collect at least one normal orb while the boost is active.", waitFor: "collect_while_multiplier" },
           { text: "Close the gate to finish tutorial and claim 20 bonus orbs.", waitFor: "complete_stage" }
         ]
@@ -646,6 +667,19 @@
       this.tutorialFlow.waitingFor = null;
       this.tutorialFlow.index += 1;
       this.showTutorialDialogStep();
+    }
+
+    checkTutorialCheckpoint() {
+      if (!this.isTutorialRun || !this.tutorialFlow || !this.tutorialFlow.waitingFor || !this.levelData?.tutorialCheckpoints) {
+        return;
+      }
+      const target = this.levelData.tutorialCheckpoints[this.tutorialFlow.waitingFor];
+      if (!target) {
+        return;
+      }
+      if (this.player.x === target.x && this.player.y === target.y) {
+        this.satisfyTutorialWait(this.tutorialFlow.waitingFor);
+      }
     }
 
     generateLevelCandidate(level, seed, softMode = false) {
@@ -1824,6 +1858,12 @@
         return;
       }
 
+      if (this.isTutorialDialogBlockingInput()) {
+        this.updateCamera();
+        this.updateHud();
+        return;
+      }
+
       this.hideInterludeActions();
       this.tickRunClock(delta);
       this.tickCollapseClock(delta);
@@ -1835,6 +1875,7 @@
       this.updateMovement(delta);
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
+      this.checkTutorialCheckpoint();
       this.updateCamera();
 
       if (this.isCollapsed(this.player.x, this.player.y)) {
@@ -1882,6 +1923,7 @@
       this.updateMovement(delta);
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
+      this.checkTutorialCheckpoint();
       this.updateCamera();
 
       if (this.isCollapsed(this.player.x, this.player.y)) {
@@ -2299,6 +2341,12 @@
           this.lastRunBeatTop = true;
           this.saveTopRecord();
         }
+        window.dispatchEvent(new CustomEvent("slidey:level-completed-time", {
+          detail: {
+            level: this.level,
+            timeMs: this.currentRunTimeMs
+          }
+        }));
       }
 
       if (!this.isTutorialRun) {
@@ -2421,8 +2469,31 @@
       if (this.timerValue) {
         this.timerValue.textContent = this.formatTime(this.currentRunTimeMs);
       }
+      this.refreshLevelTopHud();
       const ratio = this.clamp(this.levelTime / this.levelData.maxCollapseTime, 0, 1);
       this.dangerFill.style.width = `${ratio * 100}%`;
+    }
+
+    setLevelTopRecord(level, timeMs, holderName = "Top") {
+      const lv = Math.max(1, Number.isFinite(level) ? Math.floor(level) : 1);
+      if (!Number.isFinite(timeMs) || timeMs <= 0) {
+        return;
+      }
+      this.levelTopRecords.set(lv, {
+        timeMs: Math.floor(timeMs),
+        holderName: typeof holderName === "string" && holderName.trim() ? holderName.trim() : "Top"
+      });
+      if (lv === this.level) {
+        this.refreshLevelTopHud();
+      }
+    }
+
+    refreshLevelTopHud() {
+      if (!this.levelTopValue) {
+        return;
+      }
+      const record = this.levelTopRecords.get(this.level);
+      this.levelTopValue.textContent = record ? this.formatTime(record.timeMs) : "--:--.--";
     }
 
     showMessage(title, text) {

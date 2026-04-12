@@ -107,3 +107,51 @@ create trigger trg_challenge_presence_updated_at
 before update on public.challenge_presence
 for each row
 execute procedure public.touch_challenge_presence_updated_at();
+
+-- Global best time per level
+create table if not exists public.level_records (
+  level integer primary key check (level >= 1),
+  best_time_ms integer not null check (best_time_ms > 0),
+  holder_name text not null default 'Top',
+  holder_device_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.level_records enable row level security;
+
+drop policy if exists "level_records_select" on public.level_records;
+drop policy if exists "level_records_insert" on public.level_records;
+drop policy if exists "level_records_update" on public.level_records;
+
+create policy "level_records_select"
+on public.level_records
+for select
+using (true);
+
+create policy "level_records_insert"
+on public.level_records
+for insert
+with check (true);
+
+create policy "level_records_update"
+on public.level_records
+for update
+using (true)
+with check (true);
+
+create or replace function public.touch_level_records_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_level_records_updated_at on public.level_records;
+create trigger trg_level_records_updated_at
+before update on public.level_records
+for each row
+execute procedure public.touch_level_records_updated_at();
