@@ -77,6 +77,7 @@
       this.collapseFreezeRemaining = 0;
       this.orbMultiplierRemaining = 0;
       this.orbMultiplierValue = 1;
+      this.levelOrbCollected = 0;
       this.freezeWaveOrigin = null;
       this.lastTimestamp = 0;
       this.lastDelta = 1 / 60;
@@ -370,6 +371,7 @@
       this.collapseFreezeRemaining = 0;
       this.orbMultiplierRemaining = 0;
       this.orbMultiplierValue = 1;
+      this.levelOrbCollected = 0;
       this.freezeWaveOrigin = null;
       this.tutorialFlow = null;
       if (!challenge) {
@@ -1458,21 +1460,34 @@
         return jittered[0].entry.orb;
       };
 
+      const minSpecialDistance = Math.max(4, Math.floor(Math.min(rows, cols) * 0.14));
       const yellow = pickWeighted(0.08, 0.46);
       if (yellow) {
         yellow.type = "multiplier";
       }
 
       if (level >= 3) {
+        const isFarEnough = (orb) => {
+          if (!orb || !yellow) {
+            return true;
+          }
+          const dist = Math.hypot(orb.x - yellow.x, orb.y - yellow.y);
+          return dist >= minSpecialDistance;
+        };
+
         const red = pickWeighted(0, 0.3);
-        if (red && red !== yellow) {
+        if (red && red !== yellow && isFarEnough(red)) {
           red.type = "freeze";
         } else {
           for (const candidate of scored) {
-            if (candidate.orb !== yellow) {
-              candidate.orb.type = "freeze";
-              break;
+            if (candidate.orb === yellow) {
+              continue;
             }
+            if (!isFarEnough(candidate.orb)) {
+              continue;
+            }
+            candidate.orb.type = "freeze";
+            break;
           }
         }
       }
@@ -2114,6 +2129,9 @@
       this.levelTime = Math.max(0, this.levelTime - timeBonusSec);
       this.currentRunTimeMs = Math.floor(this.runClockTime * 1000);
 
+      if (orbType === "normal") {
+        this.levelOrbCollected += 1;
+      }
       this.levelOrbCount += gained;
       if (!this.isTutorialRun) {
         if (orbType === "multiplier") {
@@ -2466,7 +2484,7 @@
 
     updateHud() {
       const totalOrbs = this.countNormalOrbs();
-      this.orbValue.textContent = `${String(this.levelOrbCount).padStart(2, "0")} / ${String(totalOrbs).padStart(2, "0")}`;
+      this.orbValue.textContent = `${String(this.levelOrbCollected).padStart(2, "0")} / ${String(totalOrbs).padStart(2, "0")}`;
       this.runValue.textContent = String(this.runOrbs).padStart(2, "0");
       if (this.timerValue) {
         this.timerValue.textContent = this.formatTime(this.currentRunTimeMs);
@@ -3797,7 +3815,7 @@
       const progress = this.easeOut(this.clamp(this.loseOverlayTime / 0.42, 0, 1));
       const pulse = 0.74 + Math.sin((this.levelTime + this.loseOverlayTime) * 4.8) * 0.06;
       const title = "Collapsed";
-      const subtitle = `${String(this.levelOrbCount).padStart(2, "0")} orbs recovered`;
+      const subtitle = `${String(this.levelOrbCollected).padStart(2, "0")} orbs recovered`;
       const { frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
 
       ctx.save();
