@@ -394,13 +394,23 @@
     return out;
   };
 
+  const hashStringToSeed = (value) => {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  };
+
   const buildChallengeInfo = () => {
-    const room = randomCodeChunk(6);
-    const seed = (Math.floor(Math.random() * 0xffffffff) >>> 0);
+    const room = randomCodeChunk(5);
     const level = Math.max(1, Math.min(highestLevel, 99));
+    const seed = hashStringToSeed(`${room}:${level}`);
     const startAtMs = Date.now() + 15000;
-    const startAtSec = Math.floor(startAtMs / 1000);
-    const code = `${CHALLENGE_PREFIX}-${room}-${seed.toString(36).toUpperCase()}-${level.toString(36).toUpperCase()}-${startAtSec.toString(36).toUpperCase()}`;
+    const levelToken = level.toString(36).toUpperCase().padStart(2, "0");
+    const startToken = Math.floor(startAtMs / 1000).toString(36).toUpperCase();
+    const code = `${CHALLENGE_PREFIX}-${room}-${levelToken}-${startToken}`;
     return { room, seed, level, startAtMs, code };
   };
 
@@ -409,22 +419,23 @@
       return null;
     }
     const code = raw.trim().toUpperCase();
-    const match = /^SLD-([A-Z0-9]{6})-([A-Z0-9]+)-([A-Z0-9]+)-([A-Z0-9]+)$/.exec(code);
+    const match = /^SLD-([A-Z0-9]{5})-([A-Z0-9]{2})-([A-Z0-9]+)$/.exec(code);
     if (!match) {
       return null;
     }
     const room = match[1];
-    const seed = Number.parseInt(match[2], 36);
-    const level = Number.parseInt(match[3], 36);
-    const startAtSec = Number.parseInt(match[4], 36);
-    if (!Number.isFinite(seed) || !Number.isFinite(level) || !Number.isFinite(startAtSec)) {
+    const level = Number.parseInt(match[2], 36);
+    const startAtSec = Number.parseInt(match[3], 36);
+    if (!Number.isFinite(level) || !Number.isFinite(startAtSec)) {
       return null;
     }
+    const hostLevel = Math.max(1, Math.min(99, Math.floor(level)));
+    const seed = hashStringToSeed(`${room}:${hostLevel}`);
     return {
       code,
       room,
       seed: seed >>> 0,
-      level: Math.max(1, Math.min(99, Math.floor(level))),
+      level: hostLevel,
       startAtMs: Math.floor(startAtSec) * 1000
     };
   };
@@ -481,6 +492,7 @@
   const closeChallengeAfterResult = () => {
     stopChallengeSync();
     window.__slideyGame?.clearGhostState?.();
+    window.__slideyGame?.enterMenuDemo?.();
     hideShopMenu();
     hideChallengeMenu();
     showStartMenu();
@@ -1016,6 +1028,7 @@
   window.addEventListener("slidey:return-to-main", () => {
     stopChallengeSync();
     window.__slideyGame?.clearGhostState?.();
+    window.__slideyGame?.enterMenuDemo?.();
     hideShopMenu();
     hideChallengeMenu();
     hideChallengeResultScreen();
