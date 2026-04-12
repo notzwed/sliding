@@ -100,7 +100,6 @@
       this.demoLastStopKey = "";
       this.demoLastDir = { dx: 0, dy: 0 };
       this.demoRepeatCount = 0;
-      this.demoBounceCount = 0;
       this.demoIdleTime = 0;
       this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
       this.performanceProfile = this.computePerformanceProfile(window.innerWidth, window.innerHeight);
@@ -366,7 +365,6 @@
       this.demoLastStopKey = startKey;
       this.demoLastDir = { dx: 0, dy: 0 };
       this.demoRepeatCount = 0;
-      this.demoBounceCount = 0;
       this.demoIdleTime = 0;
       this.moveState = null;
       this.pendingDirection = null;
@@ -2000,12 +1998,6 @@
       if (this.demoStepCooldown <= 0 && !this.moveState && !this.pendingDirection) {
         const choice = this.chooseMenuDemoMove();
         if (choice) {
-          const bouncedBack = choice.toKey === this.demoPrevStopKey;
-          this.demoBounceCount = bouncedBack ? this.demoBounceCount + 1 : 0;
-          if (this.demoBounceCount >= 6) {
-            this.startLevel(1, { menuDemo: true });
-            return;
-          }
           this.queueMove(choice.dx, choice.dy, true);
           this.demoPrevStopKey = this.demoLastStopKey;
           this.demoLastStopKey = choice.toKey;
@@ -2220,7 +2212,7 @@
       score += (path.length - 1) * 1.6;
 
       if (toKey === this.demoPrevStopKey) {
-        score -= 46 + this.demoBounceCount * 38;
+        score -= 46;
       }
       if (toKey === this.demoLastStopKey) {
         score -= 140;

@@ -106,11 +106,6 @@ body.install-locked .app-shell {
   overflow: hidden;
 }
 
-body.menu-demo-ui-hidden .hud,
-body.menu-demo-ui-hidden .footer-bar {
-  display: none;
-}
-
 .hud::after,
 .footer-bar::after {
   content: "";
