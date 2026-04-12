@@ -2230,6 +2230,15 @@
         this.hideInterludeActions();
         return;
       }
+      if (this.isChallengeRun) {
+        this.hideMessage();
+        this.hideInterludeActions();
+        this.setStatusText(
+          "You collapsed. Waiting for your rival result...",
+          "Waiting for rival..."
+        );
+        return;
+      }
       this.hideMessage();
       this.showInterludeActions("lost");
       this.setStatusText(
@@ -2281,11 +2290,20 @@
         }));
       }
       this.hideMessage();
-      this.showInterludeActions("won");
+      if (this.isChallengeRun) {
+        this.hideInterludeActions();
+      } else {
+        this.showInterludeActions("won");
+      }
       if (this.isTutorialRun) {
         this.setStatusText(
           "Tutorial complete: you can now start a normal run from the Start menu.",
           "Tutorial complete."
+        );
+      } else if (this.isChallengeRun) {
+        this.setStatusText(
+          "Finish locked in. Waiting for your rival result...",
+          "Waiting for rival..."
         );
       } else {
         this.setStatusText(
@@ -2313,6 +2331,9 @@
         return;
       }
       if (this.isMenuDemo) {
+        return;
+      }
+      if (this.isChallengeRun && (this.phase === "won" || this.phase === "lost")) {
         return;
       }
 
@@ -2346,6 +2367,9 @@
         return;
       }
       if (this.isMenuDemo) {
+        return;
+      }
+      if (this.isChallengeRun && (this.phase === "won" || this.phase === "lost")) {
         return;
       }
       if (this.phase === "won" || this.phase === "lost") {
@@ -3268,6 +3292,7 @@
         renderY: this.player.renderY,
         shape: this.playerShape,
         phase: this.phase,
+        runTimeMs: this.currentRunTimeMs,
         updatedAt: Date.now()
       };
     }

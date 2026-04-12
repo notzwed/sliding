@@ -30,6 +30,11 @@
   const copyChallengeBtn = document.getElementById("copyChallengeBtn");
   const challengeCodeValue = document.getElementById("challengeCodeValue");
   const challengeStatusText = document.getElementById("challengeStatusText");
+  const challengeResultScreen = document.getElementById("challengeResultScreen");
+  const challengeFirstValue = document.getElementById("challengeFirstValue");
+  const challengeLastValue = document.getElementById("challengeLastValue");
+  const challengeResultDetail = document.getElementById("challengeResultDetail");
+  const challengeResultCloseBtn = document.getElementById("challengeResultCloseBtn");
   const shopOrbsValue = document.getElementById("shopOrbsValue");
   const shapeButtons = Array.from(document.querySelectorAll(".shop-button[data-shape]"));
 
@@ -60,6 +65,10 @@
   let challengeCountdownTimer = null;
   let challengeRealtimeChannel = null;
   let challengeRoom = "";
+  let challengeResultAutoCloseTimer = null;
+  let challengeLocalResult = null;
+  let challengeOpponentResult = null;
+  let challengeResultShown = false;
 
   const isIos = () => /iPad|iPhone|iPod/.test(window.navigator.userAgent) ||
     (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
@@ -255,6 +264,35 @@
     }
   };
 
+  const hideChallengeResultScreen = () => {
+    if (challengeResultAutoCloseTimer) {
+      window.clearTimeout(challengeResultAutoCloseTimer);
+      challengeResultAutoCloseTimer = null;
+    }
+    if (!challengeResultScreen) {
+      return;
+    }
+    challengeResultScreen.classList.add("hidden");
+    challengeResultScreen.setAttribute("aria-hidden", "true");
+  };
+
+  const showChallengeResultScreen = (firstLabel, lastLabel, detailText) => {
+    if (!challengeResultScreen) {
+      return;
+    }
+    if (challengeFirstValue) {
+      challengeFirstValue.textContent = firstLabel;
+    }
+    if (challengeLastValue) {
+      challengeLastValue.textContent = lastLabel;
+    }
+    if (challengeResultDetail) {
+      challengeResultDetail.textContent = detailText;
+    }
+    challengeResultScreen.classList.remove("hidden");
+    challengeResultScreen.setAttribute("aria-hidden", "false");
+  };
+
   const showShopMenu = () => {
     if (!shopMenu) {
       return;
@@ -314,6 +352,7 @@
 
   const stopChallengeSync = () => {
     clearChallengeCountdown();
+    hideChallengeResultScreen();
     if (challengePushTimer) {
       window.clearInterval(challengePushTimer);
       challengePushTimer = null;
@@ -341,6 +380,9 @@
       return;
     }
     challengeRoom = "";
+    challengeLocalResult = null;
+    challengeOpponentResult = null;
+    challengeResultShown = false;
   };
 
   const randomCodeChunk = (size) => {
@@ -387,8 +429,94 @@
     };
   };
 
+  const parsePhaseToken = (token) => {
+    if (typeof token !== "string" || token.length === 0) {
+      return { phase: "playing", runMs: 0 };
+    }
+    const [phaseRaw, runRaw] = token.split("|");
+    const phase = (phaseRaw || "playing").toLowerCase();
+    const runMs = Math.max(0, readNumber(runRaw, 0));
+    if (phase !== "won" && phase !== "lost") {
+      return { phase: "playing", runMs: 0 };
+    }
+    return { phase, runMs };
+  };
+
+  const updateLocalChallengeResult = (snapshot) => {
+    if (!snapshot) {
+      return { phaseToken: "playing", parsed: { phase: "playing", runMs: 0 } };
+    }
+    const parsed = parsePhaseToken(`${snapshot.phase}|${snapshot.runTimeMs}`);
+    if ((parsed.phase === "won" || parsed.phase === "lost") && !challengeLocalResult) {
+      challengeLocalResult = {
+        phase: parsed.phase,
+        runMs: parsed.runMs
+      };
+    }
+    const phaseToken = parsed.phase === "playing" ? "playing" : `${parsed.phase}|${parsed.runMs}`;
+    return { phaseToken, parsed };
+  };
+
+  const updateOpponentChallengeResult = (phaseToken) => {
+    const parsed = parsePhaseToken(phaseToken);
+    if (parsed.phase === "won" || parsed.phase === "lost") {
+      challengeOpponentResult = {
+        phase: parsed.phase,
+        runMs: parsed.runMs
+      };
+    }
+    return parsed;
+  };
+
+  const closeChallengeAfterResult = () => {
+    stopChallengeSync();
+    window.__slideyGame?.clearGhostState?.();
+    hideShopMenu();
+    hideChallengeMenu();
+    showStartMenu();
+  };
+
+  const maybeResolveChallengeResult = () => {
+    if (challengeResultShown || !challengeLocalResult || !challengeOpponentResult) {
+      return;
+    }
+
+    let first = "YOU";
+    let last = "OPPONENT";
+    let detail = "";
+
+    if (challengeLocalResult.phase === "won" && challengeOpponentResult.phase === "won") {
+      const youFirst = challengeLocalResult.runMs <= challengeOpponentResult.runMs;
+      first = youFirst ? "YOU" : "OPPONENT";
+      last = youFirst ? "OPPONENT" : "YOU";
+      detail = `Finish times — You: ${formatTime(challengeLocalResult.runMs)} | Opponent: ${formatTime(challengeOpponentResult.runMs)}`;
+    } else if (challengeLocalResult.phase === "won" && challengeOpponentResult.phase === "lost") {
+      first = "YOU";
+      last = "OPPONENT";
+      detail = `You escaped in ${formatTime(challengeLocalResult.runMs)}.`;
+    } else if (challengeLocalResult.phase === "lost" && challengeOpponentResult.phase === "won") {
+      first = "OPPONENT";
+      last = "YOU";
+      detail = `Opponent escaped in ${formatTime(challengeOpponentResult.runMs)}.`;
+    } else {
+      first = "NO WINNER";
+      last = "BOTH COLLAPSED";
+      detail = "No one reached the gate.";
+    }
+
+    challengeResultShown = true;
+    showChallengeResultScreen(first, last, detail);
+    setChallengeStatus("Challenge finished.");
+    challengeResultAutoCloseTimer = window.setTimeout(() => {
+      closeChallengeAfterResult();
+    }, 9000);
+  };
+
   const beginChallengeSync = (room) => {
     challengeRoom = room;
+    challengeLocalResult = null;
+    challengeOpponentResult = null;
+    challengeResultShown = false;
     withGame((game) => {
       game.clearGhostState?.();
     });
@@ -404,6 +532,7 @@
         if (!payload || payload.deviceId === deviceId) {
           return;
         }
+        updateOpponentChallengeResult(payload.phaseToken || payload.phase || "playing");
         window.__slideyGame?.setGhostState?.({
           x: Number(payload.x),
           y: Number(payload.y),
@@ -411,6 +540,7 @@
           renderY: Number(payload.renderY),
           shape: payload.shape
         });
+        maybeResolveChallengeResult();
       })
       .subscribe();
 
@@ -422,6 +552,7 @@
       if (!snapshot) {
         return;
       }
+      const { phaseToken, parsed } = updateLocalChallengeResult(snapshot);
       const payload = {
         challenge_code: challengeRoom,
         device_id: deviceId,
@@ -431,7 +562,7 @@
         render_x: snapshot.renderX,
         render_y: snapshot.renderY,
         shape: snapshot.shape,
-        phase: snapshot.phase,
+        phase: phaseToken,
         updated_at: new Date().toISOString()
       };
       void supabaseClient.from(CHALLENGE_TABLE).upsert(payload, { onConflict: "challenge_code,device_id" }).then(() => {
@@ -447,10 +578,12 @@
           renderX: snapshot.renderX,
           renderY: snapshot.renderY,
           shape: snapshot.shape,
-          phase: snapshot.phase,
+          phaseToken,
+          phase: parsed.phase,
           at: Date.now()
         }
       });
+      maybeResolveChallengeResult();
     }, 140);
 
     challengePullTimer = window.setInterval(async () => {
@@ -459,7 +592,7 @@
       }
       const { data, error } = await supabaseClient
         .from(CHALLENGE_TABLE)
-        .select("pos_x,pos_y,render_x,render_y,shape,updated_at")
+        .select("pos_x,pos_y,render_x,render_y,shape,phase,updated_at")
         .eq("challenge_code", challengeRoom)
         .neq("device_id", deviceId)
         .order("updated_at", { ascending: false })
@@ -478,6 +611,7 @@
         window.__slideyGame?.clearGhostState?.();
         return;
       }
+      updateOpponentChallengeResult(row.phase || "playing");
       window.__slideyGame?.setGhostState?.({
         x: Number(row.pos_x),
         y: Number(row.pos_y),
@@ -485,11 +619,13 @@
         renderY: Number(row.render_y),
         shape: row.shape
       });
+      maybeResolveChallengeResult();
     }, 220);
   };
 
   const launchChallenge = (info) => {
     stopChallengeSync();
+    hideChallengeResultScreen();
     hideShopMenu();
     showChallengeMenu();
     hideStartMenu();
@@ -804,6 +940,7 @@
     }
     copyChallengeBtn?.classList.add("hidden");
     setChallengeStatus("Create or enter a challenge code.");
+    hideChallengeResultScreen();
     updateBestTimeDisplay(readNumber(window.localStorage.getItem(BEST_TIME_KEY), 0));
     updateMenuOrbsDisplay();
     applyWalletToGame();
@@ -837,6 +974,9 @@
     hideChallengeMenu();
     showStartMenu();
   });
+  challengeResultCloseBtn?.addEventListener("click", () => {
+    closeChallengeAfterResult();
+  });
   for (const button of shapeButtons) {
     button.addEventListener("click", () => {
       const shape = button.dataset.shape;
@@ -858,6 +998,7 @@
     window.__slideyGame?.clearGhostState?.();
     hideShopMenu();
     hideChallengeMenu();
+    hideChallengeResultScreen();
     showStartMenu();
   });
 
