@@ -12,6 +12,7 @@
   const BEST_TIME_KEY = "slidey_best_time_ms";
   const TOP_RECORD_KEY = "slidey_top_record";
   const PLAYER_SHAPES = new Set(["square", "triangle", "circle", "diamond", "hex", "star", "capsule", "cross", "droplet"]);
+  const PLAYER_TRAILS = new Set(["frost", "cyan", "gold", "magma", "neo", "void"]);
 
   class RNG {
     constructor(seed) {
@@ -68,6 +69,7 @@
       this.unlockedLevel = 1;
       this.runOrbs = 0;
       this.playerShape = "square";
+      this.playerTrail = "frost";
       this.bestTimeMs = this.readStoredNumber(BEST_TIME_KEY, 0);
       this.topRecord = this.loadTopRecord();
       this.levelTopRecords = new Map();
@@ -2401,6 +2403,13 @@
       this.playerShape = shape;
     }
 
+    setPlayerTrail(trail) {
+      if (!PLAYER_TRAILS.has(trail)) {
+        return;
+      }
+      this.playerTrail = trail;
+    }
+
     handleInterludeInput() {
       if (window.__neonInstallLock) {
         return;
@@ -3239,14 +3248,15 @@
         const trailHeight = height + Math.abs(this.moveState.dy) * trail;
         const trailX = px - this.moveState.dx * trail * 0.7;
         const trailY = py - this.moveState.dy * trail * 0.7;
+        const trailStyle = this.getTrailStyle(this.playerTrail);
 
         ctx.save();
         ctx.beginPath();
         ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
         ctx.clip();
         ctx.shadowBlur = 14 * trailStrength;
-        ctx.shadowColor = `rgba(255,255,255,${0.16 + trailStrength * 0.18})`;
-        ctx.fillStyle = `rgba(255,255,255,${0.04 + trailStrength * 0.06})`;
+        ctx.shadowColor = `rgba(${trailStyle.r},${trailStyle.g},${trailStyle.b},${0.18 + trailStrength * 0.22})`;
+        ctx.fillStyle = `rgba(${trailStyle.r},${trailStyle.g},${trailStyle.b},${0.06 + trailStrength * 0.08})`;
         ctx.fillRect(trailX, trailY, trailWidth, trailHeight);
         ctx.restore();
       }
@@ -3461,6 +3471,18 @@
         droplet: { moveStretch: 0.11, moveSqueeze: 0.05, collisionSquash: 0.24, collisionStretch: 0.17 }
       };
       return profiles[shape] || defaults;
+    }
+
+    getTrailStyle(trail) {
+      const palette = {
+        frost: { r: 255, g: 255, b: 255 },
+        cyan: { r: 116, g: 244, b: 255 },
+        gold: { r: 255, g: 220, b: 120 },
+        magma: { r: 255, g: 124, b: 92 },
+        neo: { r: 128, g: 160, b: 255 },
+        void: { r: 222, g: 142, b: 255 }
+      };
+      return palette[trail] || palette.frost;
     }
 
     drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY) {

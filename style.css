@@ -337,12 +337,34 @@ body.install-locked .app-shell {
   text-transform: uppercase;
   cursor: pointer;
   box-shadow: 0 0 18px rgba(255, 255, 255, 0.14);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, left 180ms ease, top 180ms ease, right 180ms ease;
 }
 
 .app-update-btn:focus-visible,
 .app-update-btn:hover {
   border-color: rgba(255, 255, 255, 0.88);
   outline: none;
+}
+
+body.update-prompt-active > *:not(.app-update-btn) {
+  filter: blur(9px) saturate(0.45) brightness(0.6);
+  pointer-events: none;
+  user-select: none;
+}
+
+body.update-prompt-active .app-update-btn {
+  left: 50%;
+  top: 50%;
+  right: auto;
+  transform: translate(-50%, -50%);
+  min-height: 54px;
+  padding: 12px 22px;
+  font-size: 0.86rem;
+  border-color: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.2) inset,
+    0 18px 42px rgba(0, 0, 0, 0.5),
+    0 0 34px rgba(255, 255, 255, 0.3);
 }
 
 .message-title {
@@ -708,6 +730,7 @@ body.install-locked .app-shell {
     radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.08), transparent 42%);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+  overflow-y: auto;
 }
 
 .shop-menu.hidden {
@@ -737,6 +760,15 @@ body.install-locked .app-shell {
   margin-left: 8px;
 }
 
+.shop-section-title {
+  margin: 4px 0 -2px;
+  font-family: var(--font-display);
+  letter-spacing: 0.14em;
+  font-size: clamp(0.88rem, 3vw, 1.05rem);
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+}
+
 .shop-grid {
   width: min(96vw, 860px);
   display: grid;
@@ -762,12 +794,43 @@ body.install-locked .app-shell {
   position: relative;
 }
 
+.trail-preview {
+  width: min(22vw, 96px);
+  height: min(22vw, 96px);
+  position: relative;
+  overflow: hidden;
+}
+
 .shape-preview::before {
   content: "";
   position: absolute;
   inset: 20%;
   background: #fff;
   filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.45));
+}
+
+.trail-preview::before,
+.trail-preview::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 14%;
+  right: 14%;
+  border-radius: 999px;
+  transform: translateY(-50%);
+}
+
+.trail-preview::before {
+  height: 16%;
+  opacity: 0.8;
+  filter: blur(0.2px);
+}
+
+.trail-preview::after {
+  height: 38%;
+  opacity: 0.38;
+  filter: blur(7px);
+  animation: trailPreviewPulse 1.6s ease-in-out infinite;
 }
 
 .shape-preview-square::before {
@@ -815,6 +878,36 @@ body.install-locked .app-shell {
   animation: previewDroplet 2.15s ease-in-out infinite;
 }
 
+.trail-preview-frost::before,
+.trail-preview-frost::after {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.88) 48%, rgba(255, 255, 255, 0.08));
+}
+
+.trail-preview-cyan::before,
+.trail-preview-cyan::after {
+  background: linear-gradient(90deg, rgba(116, 244, 255, 0.08), rgba(116, 244, 255, 0.95) 48%, rgba(116, 244, 255, 0.08));
+}
+
+.trail-preview-gold::before,
+.trail-preview-gold::after {
+  background: linear-gradient(90deg, rgba(255, 220, 120, 0.08), rgba(255, 220, 120, 0.95) 48%, rgba(255, 220, 120, 0.08));
+}
+
+.trail-preview-magma::before,
+.trail-preview-magma::after {
+  background: linear-gradient(90deg, rgba(255, 124, 92, 0.08), rgba(255, 124, 92, 0.95) 48%, rgba(255, 124, 92, 0.08));
+}
+
+.trail-preview-neo::before,
+.trail-preview-neo::after {
+  background: linear-gradient(90deg, rgba(128, 160, 255, 0.08), rgba(128, 160, 255, 0.95) 48%, rgba(128, 160, 255, 0.08));
+}
+
+.trail-preview-void::before,
+.trail-preview-void::after {
+  background: linear-gradient(90deg, rgba(222, 142, 255, 0.08), rgba(222, 142, 255, 0.95) 48%, rgba(222, 142, 255, 0.08));
+}
+
 .shop-item-title {
   margin: 0;
   letter-spacing: 0.1em;
@@ -858,6 +951,10 @@ body.install-locked .app-shell {
 
 .shop-close {
   min-width: 130px;
+}
+
+.shop-grid-trails .shop-card {
+  min-height: 196px;
 }
 
 .challenge-menu {
@@ -1149,6 +1246,11 @@ body.install-locked .app-shell {
   50% { transform: rotate(12deg) scale(0.94, 1.1); }
 }
 
+@keyframes trailPreviewPulse {
+  0%, 100% { transform: translateY(-50%) scaleX(0.92); opacity: 0.28; }
+  50% { transform: translateY(-50%) scaleX(1.08); opacity: 0.5; }
+}
+
 @media (pointer: coarse) {
   body::before {
     opacity: 0.08;
@@ -1417,7 +1519,8 @@ body.install-locked .app-shell {
     width: min(92vw, 360px);
   }
 
-  .shape-preview {
+  .shape-preview,
+  .trail-preview {
     width: 78px;
     height: 78px;
   }
