@@ -101,6 +101,8 @@
       this.demoLastDir = { dx: 0, dy: 0 };
       this.demoRepeatCount = 0;
       this.demoBounceCount = 0;
+      this.demoRecentStops = [];
+      this.demoStopVisitCounts = new Map();
       this.demoIdleTime = 0;
       this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
       this.performanceProfile = this.computePerformanceProfile(window.innerWidth, window.innerHeight);
@@ -367,6 +369,8 @@
       this.demoLastDir = { dx: 0, dy: 0 };
       this.demoRepeatCount = 0;
       this.demoBounceCount = 0;
+      this.demoRecentStops = [startKey];
+      this.demoStopVisitCounts = new Map([[startKey, 1]]);
       this.demoIdleTime = 0;
       this.moveState = null;
       this.pendingDirection = null;
@@ -2009,6 +2013,11 @@
           this.queueMove(choice.dx, choice.dy, true);
           this.demoPrevStopKey = this.demoLastStopKey;
           this.demoLastStopKey = choice.toKey;
+          this.demoRecentStops.push(choice.toKey);
+          while (this.demoRecentStops.length > 10) {
+            this.demoRecentStops.shift();
+          }
+          this.demoStopVisitCounts.set(choice.toKey, (this.demoStopVisitCounts.get(choice.toKey) || 0) + 1);
           if (choice.dx === this.demoLastDir.dx && choice.dy === this.demoLastDir.dy) {
             this.demoRepeatCount = Math.min(5, this.demoRepeatCount + 1);
           } else {
@@ -2139,10 +2148,11 @@
         [directions[i], directions[j]] = [directions[j], directions[i]];
       }
 
+      const rootState = this.buildMenuDemoSimState();
       let best = null;
       let fallback = null;
       for (const dir of directions) {
-        const path = this.findSlidePath(dir.dx, dir.dy);
+        const path = this.findSlidePathFromState(rootState, dir.dx, dir.dy);
         if (path.length <= 1) {
           continue;
         }
@@ -2156,7 +2166,10 @@
             toKey: this.cellKey(to.x, to.y),
           };
         }
-        const score = this.scoreMenuDemoMove(path, dir.dx, dir.dy);
+        const immediateScore = this.scoreMenuDemoMove(path, dir.dx, dir.dy, rootState);
+        const projectedState = this.projectMenuDemoStateAfterMove(rootState, path, dir.dx, dir.dy);
+        const lookaheadScore = this.evaluateMenuDemoLookahead(projectedState, 2);
+        const score = immediateScore + lookaheadScore * 0.7;
         if (!Number.isFinite(score)) {
           continue;
         }
@@ -2174,25 +2187,166 @@
       return best || fallback;
     }
 
-    scoreMenuDemoMove(path, dx, dy) {
+    evaluateMenuDemoLookahead(state, depth) {
+      if (depth <= 0) {
+        return 0;
+      }
+      const directions = [
+        { dx: 0, dy: -1 },
+        { dx: 1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 },
+      ];
+      let best = -Infinity;
+      for (const dir of directions) {
+        const path = this.findSlidePathFromState(state, dir.dx, dir.dy);
+        if (path.length <= 1) {
+          continue;
+        }
+        const moveScore = this.scoreMenuDemoMove(path, dir.dx, dir.dy, state);
+        if (!Number.isFinite(moveScore)) {
+          continue;
+        }
+        const nextState = this.projectMenuDemoStateAfterMove(state, path, dir.dx, dir.dy);
+        const futureScore = this.evaluateMenuDemoLookahead(nextState, depth - 1);
+        const totalScore = moveScore * 0.84 + futureScore * 0.64;
+        if (totalScore > best) {
+          best = totalScore;
+        }
+      }
+      if (!Number.isFinite(best)) {
+        return -120;
+      }
+      return best;
+    }
+
+    buildMenuDemoSimState() {
+      const collectedOrbKeys = new Set();
+      for (const [key, orb] of this.levelData.orbCells.entries()) {
+        if (orb?.collected) {
+          collectedOrbKeys.add(key);
+        }
+      }
+      return {
+        x: this.player.x,
+        y: this.player.y,
+        time: this.levelTime,
+        prevStopKey: this.demoPrevStopKey,
+        lastStopKey: this.demoLastStopKey,
+        lastDir: { ...this.demoLastDir },
+        repeatCount: this.demoRepeatCount,
+        bounceCount: this.demoBounceCount,
+        recentStops: [...this.demoRecentStops],
+        visitCounts: new Map(this.demoStopVisitCounts),
+        collectedOrbKeys
+      };
+    }
+
+    projectMenuDemoStateAfterMove(state, path, dx, dy) {
+      const to = path[path.length - 1];
+      const toKey = this.cellKey(to.x, to.y);
+      const distance = Math.max(0, path.length - 1);
+      const nextTime = state.time + this.getSlideDuration(distance);
+      const nextCollected = new Set(state.collectedOrbKeys);
+      for (let i = 1; i < path.length; i += 1) {
+        const key = this.cellKey(path[i].x, path[i].y);
+        if (this.levelData.orbCells.has(key)) {
+          nextCollected.add(key);
+        }
+      }
+
+      const nextRecentStops = [...state.recentStops, toKey];
+      while (nextRecentStops.length > 10) {
+        nextRecentStops.shift();
+      }
+      const nextVisitCounts = new Map(state.visitCounts);
+      nextVisitCounts.set(toKey, (nextVisitCounts.get(toKey) || 0) + 1);
+
+      return {
+        x: to.x,
+        y: to.y,
+        time: nextTime,
+        prevStopKey: state.lastStopKey,
+        lastStopKey: toKey,
+        lastDir: { dx, dy },
+        repeatCount: (dx === state.lastDir.dx && dy === state.lastDir.dy) ? Math.min(7, state.repeatCount + 1) : 0,
+        bounceCount: toKey === state.prevStopKey ? state.bounceCount + 1 : 0,
+        recentStops: nextRecentStops,
+        visitCounts: nextVisitCounts,
+        collectedOrbKeys: nextCollected
+      };
+    }
+
+    findSlidePathFromState(state, dx, dy) {
+      const rawPath = [{ x: state.x, y: state.y }];
+      let currentX = state.x;
+      let currentY = state.y;
+
+      while (true) {
+        const nextX = currentX + dx;
+        const nextY = currentY + dy;
+        if (!this.canMoveToAt(nextX, nextY, state.time)) {
+          break;
+        }
+        currentX = nextX;
+        currentY = nextY;
+        rawPath.push({ x: currentX, y: currentY });
+      }
+
+      if (rawPath.length <= 1) {
+        return rawPath;
+      }
+
+      const distance = rawPath.length - 1;
+      const stepTime = this.getSlideDuration(distance) / distance;
+      const safePath = [rawPath[0]];
+      for (let i = 1; i < rawPath.length; i += 1) {
+        const cell = rawPath[i];
+        if (state.time + stepTime * i >= this.levelData.collapseAt[cell.y][cell.x]) {
+          break;
+        }
+        safePath.push(cell);
+      }
+
+      if (safePath.length <= 1) {
+        return [rawPath[0]];
+      }
+      return safePath;
+    }
+
+    scoreMenuDemoMove(path, dx, dy, state = null) {
+      const simulatedState = state || this.buildMenuDemoSimState();
       const from = path[0];
       const to = path[path.length - 1];
       const toKey = this.cellKey(to.x, to.y);
       let score = 0;
+      const projectedCollected = new Set(simulatedState.collectedOrbKeys);
 
       let normalCollected = 0;
+      let specialCollected = 0;
       for (let i = 1; i < path.length; i += 1) {
         const cell = path[i];
-        const orb = this.levelData.orbCells.get(this.cellKey(cell.x, cell.y));
-        if (orb && !orb.collected && (orb.type || "normal") === "normal") {
+        const key = this.cellKey(cell.x, cell.y);
+        if (projectedCollected.has(key)) {
+          continue;
+        }
+        const orb = this.levelData.orbCells.get(key);
+        if (!orb) {
+          continue;
+        }
+        projectedCollected.add(key);
+        if ((orb.type || "normal") === "normal") {
           normalCollected += 1;
+        } else {
+          specialCollected += 1;
         }
       }
-      score += normalCollected * 220;
+      score += normalCollected * 250;
+      score += specialCollected * 70;
 
       let remainingNormal = 0;
       for (const orb of this.levelData.orbCells.values()) {
-        if (!orb.collected && (orb.type || "normal") === "normal") {
+        if ((orb.type || "normal") === "normal" && !projectedCollected.has(this.cellKey(orb.x, orb.y))) {
           remainingNormal += 1;
         }
       }
@@ -2200,7 +2354,10 @@
       if (hasRemainingNormal) {
         let nearestNormal = Infinity;
         for (const orb of this.levelData.orbCells.values()) {
-          if (orb.collected || (orb.type || "normal") !== "normal") {
+          if ((orb.type || "normal") !== "normal") {
+            continue;
+          }
+          if (projectedCollected.has(this.cellKey(orb.x, orb.y))) {
             continue;
           }
           const manhattan = Math.abs(orb.x - to.x) + Math.abs(orb.y - to.y);
@@ -2209,34 +2366,45 @@
           }
         }
         if (Number.isFinite(nearestNormal)) {
-          score -= nearestNormal * 5.2;
+          score -= nearestNormal * 7.1;
         }
       }
 
       const exitDist = Math.abs(this.levelData.exit.x - to.x) + Math.abs(this.levelData.exit.y - to.y);
-      score -= exitDist * (hasRemainingNormal ? 1.9 : 6.5);
+      score -= exitDist * (hasRemainingNormal ? 1.9 : 8.2);
 
       score += (from.y - to.y) * 7.5;
-      score += (path.length - 1) * 1.6;
+      score += (path.length - 1) * 2.4;
 
-      if (toKey === this.demoPrevStopKey) {
-        score -= 46 + this.demoBounceCount * 38;
+      if (toKey === simulatedState.prevStopKey) {
+        score -= 92 + simulatedState.bounceCount * 66;
       }
-      if (toKey === this.demoLastStopKey) {
-        score -= 140;
+      if (toKey === simulatedState.lastStopKey) {
+        score -= 240;
       }
-      if (dx === this.demoLastDir.dx && dy === this.demoLastDir.dy) {
-        score -= 16 + this.demoRepeatCount * 10;
+      if (dx === simulatedState.lastDir.dx && dy === simulatedState.lastDir.dy) {
+        score -= 24 + simulatedState.repeatCount * 12;
+      }
+
+      const recentHits = simulatedState.recentStops.reduce((acc, key) => acc + (key === toKey ? 1 : 0), 0);
+      score -= recentHits * 70;
+      const visitedCount = simulatedState.visitCounts.get(toKey) || 0;
+      if (visitedCount === 0) {
+        score += 36;
+      } else {
+        score -= visitedCount * 28;
       }
 
       const collapseTime = this.levelData.collapseAt[to.y]?.[to.x] ?? Infinity;
-      const timeLeft = collapseTime - this.levelTime;
+      const distance = Math.max(0, path.length - 1);
+      const arrivalTime = simulatedState.time + this.getSlideDuration(distance);
+      const timeLeft = collapseTime - arrivalTime;
       if (timeLeft < 0.9) {
-        score -= 280;
+        score -= 320;
       } else if (timeLeft < 1.35) {
-        score -= 85;
+        score -= 120;
       } else if (timeLeft < 1.8) {
-        score -= 35;
+        score -= 48;
       }
 
       return score;
@@ -2253,6 +2421,19 @@
         return false;
       }
       return !this.isCollapsed(x, y);
+    }
+
+    canMoveToAt(x, y, time) {
+      if (x < 0 || y < 0 || y >= this.levelData.rows || x >= this.levelData.cols) {
+        return false;
+      }
+      if (this.levelData.grid[y][x] !== "floor") {
+        return false;
+      }
+      if (this.isDynamicWallClosed(x, y, time)) {
+        return false;
+      }
+      return !this.isCollapsedAt(x, y, time);
     }
 
     collectOrbIfNeeded(x = this.player.x, y = this.player.y) {
@@ -4198,6 +4379,14 @@
 
     isCollapsed(x, y) {
       return this.levelTime >= this.levelData.collapseAt[y][x];
+    }
+
+    isCollapsedAt(x, y, time) {
+      if (x < 0 || y < 0 || y >= this.levelData.rows || x >= this.levelData.cols) {
+        return true;
+      }
+      const collapseTime = this.levelData.collapseAt[y]?.[x] ?? 0;
+      return time >= collapseTime;
     }
 
     isWallCell(x, y) {
