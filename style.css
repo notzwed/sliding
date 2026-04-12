@@ -424,6 +424,19 @@ body.install-locked .app-shell {
   pointer-events: none;
 }
 
+.tutorial-dialog-body {
+  display: grid;
+  gap: 6px;
+}
+
+.tutorial-dialog-meta {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+}
+
 .tutorial-avatar {
   width: 44px;
   height: 44px;
@@ -1272,6 +1285,27 @@ body.install-locked .app-shell {
   .challenge-code-value {
     font-size: clamp(1.25rem, 6.2vw, 1.9rem);
     letter-spacing: 0.24em;
+  }
+
+  .tutorial-dialog {
+    width: min(95%, 560px);
+    padding: 14px 14px;
+    border-radius: 16px;
+    gap: 10px;
+  }
+
+  .tutorial-avatar {
+    width: 38px;
+    height: 38px;
+  }
+
+  .tutorial-dialog-text {
+    font-size: 0.92rem;
+    line-height: 1.36;
+  }
+
+  .tutorial-dialog-meta {
+    font-size: 0.62rem;
   }
 
   .start-menu {

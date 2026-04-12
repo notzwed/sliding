@@ -56,6 +56,7 @@
       this.tutorialBlur = document.getElementById("tutorialBlur");
       this.tutorialDialog = document.getElementById("tutorialDialog");
       this.tutorialAvatar = document.getElementById("tutorialAvatar");
+      this.tutorialDialogMeta = document.getElementById("tutorialDialogMeta");
       this.tutorialDialogText = document.getElementById("tutorialDialogText");
       this.tutorialDialogNext = document.getElementById("tutorialDialogNext");
       this.interludeActions = document.getElementById("interludeActions");
@@ -193,6 +194,9 @@
       }
 
       this.canvas.addEventListener("pointerdown", (event) => {
+        if (this.isTutorialDialogBlockingInput()) {
+          return;
+        }
         this.activePointerId = event.pointerId;
         if (this.canvas.setPointerCapture) {
           this.canvas.setPointerCapture(event.pointerId);
@@ -466,25 +470,29 @@
         {
           floorCells: [
             [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
-            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3], [9, 2], [9, 1]
+            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3],
+            [8, 7], [7, 7], [6, 7], [5, 7],
+            [5, 6], [5, 5], [6, 5], [7, 5], [8, 5]
           ],
           start: { x: 1, y: 9 },
           exit: { x: 9, y: 3 },
           orbs: [
-            { x: 9, y: 7, type: "freeze" },
-            { x: 9, y: 5, type: "normal" }
+            { x: 5, y: 7, type: "freeze" },
+            { x: 7, y: 5, type: "normal" }
           ]
         },
         {
           floorCells: [
             [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
-            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3], [9, 2], [9, 1]
+            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3], [9, 2], [9, 1],
+            [8, 8], [7, 8], [6, 8],
+            [6, 7], [6, 6], [7, 6], [8, 6]
           ],
           start: { x: 1, y: 9 },
           exit: { x: 9, y: 1 },
           orbs: [
-            { x: 9, y: 8, type: "multiplier" },
-            { x: 9, y: 6, type: "normal" },
+            { x: 6, y: 8, type: "multiplier" },
+            { x: 8, y: 6, type: "normal" },
             { x: 9, y: 5, type: "normal" }
           ]
         }
@@ -594,6 +602,11 @@
         return;
       }
       this.updateTutorialAvatar();
+      if (this.tutorialDialogMeta) {
+        const stageLabel = this.tutorialFlow.stage + 1;
+        const stepLabel = Math.min(this.tutorialFlow.index + 1, this.tutorialFlow.script.length);
+        this.tutorialDialogMeta.textContent = `Tutorial ${stageLabel}/3 - Step ${stepLabel}/${this.tutorialFlow.script.length}`;
+      }
       this.tutorialDialogText.textContent = step.text;
       this.tutorialBlur?.classList.remove("hidden");
       this.tutorialDialog.classList.remove("hidden");
@@ -1921,10 +1934,22 @@
       if (!force && (window.__neonInstallLock || this.isMenuDemo || this.phase !== "playing" || this.moveState || this.pendingDirection)) {
         return;
       }
+      if (!force && this.isTutorialDialogBlockingInput()) {
+        return;
+      }
       this.pendingDirection = { dx, dy };
       if (!this.moveState) {
         this.updateMovement(0);
       }
+    }
+
+    isTutorialDialogBlockingInput() {
+      return Boolean(
+        this.isTutorialRun &&
+        this.phase === "playing" &&
+        this.tutorialDialog &&
+        !this.tutorialDialog.classList.contains("hidden")
+      );
     }
 
     startSlide(dx, dy) {
