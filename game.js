@@ -87,6 +87,8 @@
       this.pendingDirection = null;
       this.lastMoveDirection = { dx: 0, dy: -1 };
       this.triangleSpinTime = 0;
+      this.trailPath = [];
+      this.trailSampleClock = 0;
       this.isMenuDemo = false;
       this.isTutorialRun = false;
       this.isChallengeRun = false;
@@ -356,6 +358,7 @@
         renderX: this.levelData.start.x,
         renderY: this.levelData.start.y,
       };
+      this.resetTrailPath();
       this.moveState = null;
       this.pendingDirection = null;
       this.levelTime = 0;
@@ -1835,24 +1838,28 @@
       }
 
       if (this.phase === "exiting") {
+        this.pushTrailSample(delta);
         this.updateExitEffect(delta);
         this.updateCamera();
         return;
       }
 
       if (this.phase === "won") {
+        this.pushTrailSample(delta);
         this.updateWinOverlay(delta);
         this.updateCamera();
         return;
       }
 
       if (this.phase === "dying") {
+        this.pushTrailSample(delta);
         this.updateDeathEffect(delta);
         this.updateCamera();
         return;
       }
 
       if (this.phase === "lost") {
+        this.pushTrailSample(delta);
         this.updateLoseOverlay(delta);
         this.updateGhost(delta);
         this.updateCamera();
@@ -1860,6 +1867,7 @@
       }
 
       if (this.isTutorialDialogBlockingInput()) {
+        this.pushTrailSample(delta);
         this.updateGhost(delta);
         this.updateCamera();
         this.updateHud();
@@ -1875,6 +1883,7 @@
       }
       this.introFocusTime = Math.max(0, this.introFocusTime - delta);
       this.updateMovement(delta);
+      this.pushTrailSample(delta);
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
       this.checkTutorialCheckpoint();
@@ -1924,6 +1933,7 @@
       }
       this.introFocusTime = Math.max(0, this.introFocusTime - delta);
       this.updateMovement(delta);
+      this.pushTrailSample(delta);
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
       this.checkTutorialCheckpoint();
@@ -3241,24 +3251,11 @@
       const px = centerX - width / 2 + offsetX;
       const py = centerY - height / 2 + offsetY;
       const auraPulse = 0.84 + Math.sin(this.levelTime * 3.2) * 0.16;
+      const freezeTint = this.getFreezeTintAtCell(this.player.renderX + 0.5, this.player.renderY + 0.5);
+      const goldActive = this.orbMultiplierRemaining > 0;
 
-      if (this.moveState && !this.exitEffect && trailStrength > 0) {
-        const trail = this.smoothPulse(this.moveState.progress) * cellSize * 0.12;
-        const trailWidth = width + Math.abs(this.moveState.dx) * trail;
-        const trailHeight = height + Math.abs(this.moveState.dy) * trail;
-        const trailX = px - this.moveState.dx * trail * 0.7;
-        const trailY = py - this.moveState.dy * trail * 0.7;
-        const trailStyle = this.getTrailStyle(this.playerTrail);
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
-        ctx.clip();
-        ctx.shadowBlur = 14 * trailStrength;
-        ctx.shadowColor = `rgba(${trailStyle.r},${trailStyle.g},${trailStyle.b},${0.18 + trailStrength * 0.22})`;
-        ctx.fillStyle = `rgba(${trailStyle.r},${trailStyle.g},${trailStyle.b},${0.06 + trailStrength * 0.08})`;
-        ctx.fillRect(trailX, trailY, trailWidth, trailHeight);
-        ctx.restore();
+      if (!this.exitEffect && trailStrength > 0) {
+        this.drawPlayerTrail(ctx, frameX, frameY, viewportWidth, viewportHeight, cellSize, trailStrength, freezeTint, goldActive);
       }
 
       if (this.exitEffect && !reducedEffects) {
@@ -3281,8 +3278,6 @@
       ctx.beginPath();
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
-      const freezeTint = this.getFreezeTintAtCell(this.player.renderX + 0.5, this.player.renderY + 0.5);
-      const goldActive = this.orbMultiplierRemaining > 0;
       if (glowStrength > 0) {
         const auraRadius = Math.max(width, height) * (1.45 + auraPulse * 0.22);
         const aura = ctx.createRadialGradient(centerX + offsetX, centerY + offsetY, 0, centerX + offsetX, centerY + offsetY, auraRadius);
@@ -3483,6 +3478,122 @@
         void: { r: 222, g: 142, b: 255 }
       };
       return palette[trail] || palette.frost;
+    }
+
+    resetTrailPath() {
+      const x = Number.isFinite(this.player?.renderX) ? this.player.renderX : 0;
+      const y = Number.isFinite(this.player?.renderY) ? this.player.renderY : 0;
+      this.trailPath = [{ x, y, age: 0 }];
+      this.trailSampleClock = 0;
+    }
+
+    pushTrailSample(delta) {
+      if (!this.trailPath) {
+        this.trailPath = [];
+      }
+      const lifetime = 0.42;
+      const maxPoints = this.performanceProfile.coarsePointer ? 14 : 20;
+      const sampleInterval = this.performanceProfile.coarsePointer ? 0.04 : 0.026;
+      const blendFactor = 1 - Math.exp(-Math.max(0.0001, delta) * 22);
+
+      for (let i = this.trailPath.length - 1; i >= 0; i -= 1) {
+        const sample = this.trailPath[i];
+        sample.age += delta;
+        if (sample.age > lifetime) {
+          this.trailPath.splice(i, 1);
+        }
+      }
+
+      const x = this.player.renderX;
+      const y = this.player.renderY;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
+
+      this.trailSampleClock += delta;
+      const last = this.trailPath[this.trailPath.length - 1];
+      if (!last) {
+        this.trailPath.push({ x, y, age: 0 });
+        this.trailSampleClock = 0;
+      } else {
+        const dx = x - last.x;
+        const dy = y - last.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0.035 || this.trailSampleClock >= sampleInterval) {
+          this.trailPath.push({ x, y, age: 0 });
+          this.trailSampleClock = 0;
+        } else {
+          last.x = this.lerp(last.x, x, blendFactor);
+          last.y = this.lerp(last.y, y, blendFactor);
+          last.age = Math.min(last.age, 0.01);
+        }
+      }
+
+      while (this.trailPath.length > maxPoints) {
+        this.trailPath.shift();
+      }
+    }
+
+    drawPlayerTrail(ctx, frameX, frameY, viewportWidth, viewportHeight, cellSize, trailStrength, freezeTint = 0, goldActive = false) {
+      if (!this.trailPath || this.trailPath.length < 2) {
+        return;
+      }
+
+      let trailColor = this.getTrailStyle(this.playerTrail);
+      if (freezeTint > 0.01) {
+        trailColor = { r: 255, g: 96, b: 96 };
+      } else if (goldActive) {
+        trailColor = { r: 255, g: 214, b: 88 };
+      }
+
+      const points = this.trailPath.map((sample) => {
+        const pos = this.toScreen(sample.x, sample.y);
+        return {
+          x: pos.x + cellSize / 2,
+          y: pos.y + cellSize / 2
+        };
+      });
+
+      const len = points.length;
+      if (len < 2) {
+        return;
+      }
+      const intensity = 0.5 + trailStrength * 0.9;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
+      ctx.clip();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      for (let i = 1; i < len; i += 1) {
+        const a = points[i - 1];
+        const b = points[i];
+        const freshness = i / (len - 1);
+        const alpha = (0.035 + 0.22 * freshness * freshness) * intensity;
+        const width = cellSize * (0.06 + 0.11 * freshness) * (0.72 + intensity * 0.42);
+
+        ctx.strokeStyle = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${alpha})`;
+        ctx.shadowBlur = Math.max(5, 10 * intensity * freshness);
+        ctx.shadowColor = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${alpha * 1.4})`;
+        ctx.lineWidth = Math.max(1.2, width);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+
+      const head = points[len - 1];
+      const pulse = 0.9 + Math.sin(this.levelTime * 6.4) * 0.1;
+      ctx.shadowBlur = 16 * intensity;
+      ctx.shadowColor = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${0.28 * intensity})`;
+      ctx.fillStyle = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${0.14 + intensity * 0.16})`;
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, cellSize * 0.15 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
     }
 
     drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY) {
