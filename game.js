@@ -100,6 +100,7 @@
       this.demoLastStopKey = "";
       this.demoLastDir = { dx: 0, dy: 0 };
       this.demoRepeatCount = 0;
+      this.demoIdleTime = 0;
       this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
       this.performanceProfile = this.computePerformanceProfile(window.innerWidth, window.innerHeight);
       this.boardMetrics = null;
@@ -364,6 +365,7 @@
       this.demoLastStopKey = startKey;
       this.demoLastDir = { dx: 0, dy: 0 };
       this.demoRepeatCount = 0;
+      this.demoIdleTime = 0;
       this.moveState = null;
       this.pendingDirection = null;
       this.levelTime = 0;
@@ -1960,6 +1962,7 @@
       this.tickCollapseClock(delta);
       this.tickOrbEffects(delta);
       if (this.moveState) {
+        this.demoIdleTime = 0;
         this.triangleSpinTime += delta * 6.8;
       }
       this.introFocusTime = Math.max(0, this.introFocusTime - delta);
@@ -2005,6 +2008,14 @@
           }
           this.demoLastDir = { dx: choice.dx, dy: choice.dy };
           this.demoStepCooldown = 0.08 + Math.min(0.26, choice.distance * 0.016) + Math.random() * 0.08;
+          this.demoIdleTime = 0;
+        } else {
+          this.demoIdleTime += delta;
+          if (this.demoIdleTime > 0.75) {
+            this.startLevel(1, { menuDemo: true });
+            return;
+          }
+          this.demoStepCooldown = 0.06;
         }
       }
 
@@ -2121,12 +2132,26 @@
       }
 
       let best = null;
+      let fallback = null;
       for (const dir of directions) {
         const path = this.findSlidePath(dir.dx, dir.dy);
         if (path.length <= 1) {
           continue;
         }
+        if (!fallback || path.length > fallback.distance) {
+          const to = path[path.length - 1];
+          fallback = {
+            dx: dir.dx,
+            dy: dir.dy,
+            score: -Infinity,
+            distance: path.length - 1,
+            toKey: this.cellKey(to.x, to.y),
+          };
+        }
         const score = this.scoreMenuDemoMove(path, dir.dx, dir.dy);
+        if (!Number.isFinite(score)) {
+          continue;
+        }
         if (!best || score > best.score) {
           const to = path[path.length - 1];
           best = {
@@ -2138,7 +2163,7 @@
           };
         }
       }
-      return best;
+      return best || fallback;
     }
 
     scoreMenuDemoMove(path, dx, dy) {
