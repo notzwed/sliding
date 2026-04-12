@@ -12,7 +12,6 @@
   const BEST_TIME_KEY = "slidey_best_time_ms";
   const TOP_RECORD_KEY = "slidey_top_record";
   const PLAYER_SHAPES = new Set(["square", "triangle", "circle", "diamond", "hex", "star", "capsule", "cross", "droplet"]);
-  const PLAYER_TRAILS = new Set(["frost", "cyan", "gold", "magma", "neo", "void"]);
 
   class RNG {
     constructor(seed) {
@@ -69,7 +68,6 @@
       this.unlockedLevel = 1;
       this.runOrbs = 0;
       this.playerShape = "square";
-      this.playerTrail = "frost";
       this.bestTimeMs = this.readStoredNumber(BEST_TIME_KEY, 0);
       this.topRecord = this.loadTopRecord();
       this.levelTopRecords = new Map();
@@ -87,8 +85,6 @@
       this.pendingDirection = null;
       this.lastMoveDirection = { dx: 0, dy: -1 };
       this.triangleSpinTime = 0;
-      this.trailPath = [];
-      this.trailSampleClock = 0;
       this.isMenuDemo = false;
       this.isTutorialRun = false;
       this.isChallengeRun = false;
@@ -358,7 +354,6 @@
         renderX: this.levelData.start.x,
         renderY: this.levelData.start.y,
       };
-      this.resetTrailPath();
       this.moveState = null;
       this.pendingDirection = null;
       this.levelTime = 0;
@@ -1838,28 +1833,24 @@
       }
 
       if (this.phase === "exiting") {
-        this.pushTrailSample(delta);
         this.updateExitEffect(delta);
         this.updateCamera();
         return;
       }
 
       if (this.phase === "won") {
-        this.pushTrailSample(delta);
         this.updateWinOverlay(delta);
         this.updateCamera();
         return;
       }
 
       if (this.phase === "dying") {
-        this.pushTrailSample(delta);
         this.updateDeathEffect(delta);
         this.updateCamera();
         return;
       }
 
       if (this.phase === "lost") {
-        this.pushTrailSample(delta);
         this.updateLoseOverlay(delta);
         this.updateGhost(delta);
         this.updateCamera();
@@ -1867,7 +1858,6 @@
       }
 
       if (this.isTutorialDialogBlockingInput()) {
-        this.pushTrailSample(delta);
         this.updateGhost(delta);
         this.updateCamera();
         this.updateHud();
@@ -1883,7 +1873,6 @@
       }
       this.introFocusTime = Math.max(0, this.introFocusTime - delta);
       this.updateMovement(delta);
-      this.pushTrailSample(delta);
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
       this.checkTutorialCheckpoint();
@@ -1933,7 +1922,6 @@
       }
       this.introFocusTime = Math.max(0, this.introFocusTime - delta);
       this.updateMovement(delta);
-      this.pushTrailSample(delta);
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
       this.checkTutorialCheckpoint();
@@ -2411,13 +2399,6 @@
         return;
       }
       this.playerShape = shape;
-    }
-
-    setPlayerTrail(trail) {
-      if (!PLAYER_TRAILS.has(trail)) {
-        return;
-      }
-      this.playerTrail = trail;
     }
 
     handleInterludeInput() {
@@ -3194,7 +3175,6 @@
       const size = cellSize * 0.48;
       const reducedEffects = this.performanceProfile.reducedEffects;
       const glowStrength = this.performanceProfile.glowStrength;
-      const trailStrength = this.performanceProfile.trailStrength;
 
       if (this.deathEffect) {
         this.drawPlayerDeath(ctx, centerX, centerY, size, frameX, frameY, viewportWidth, viewportHeight, cellSize);
@@ -3253,10 +3233,6 @@
       const auraPulse = 0.84 + Math.sin(this.levelTime * 3.2) * 0.16;
       const freezeTint = this.getFreezeTintAtCell(this.player.renderX + 0.5, this.player.renderY + 0.5);
       const goldActive = this.orbMultiplierRemaining > 0;
-
-      if (!this.exitEffect && trailStrength > 0) {
-        this.drawPlayerTrail(ctx, frameX, frameY, viewportWidth, viewportHeight, cellSize, trailStrength, freezeTint, goldActive);
-      }
 
       if (this.exitEffect && !reducedEffects) {
         const enter = this.easeInOutSine(this.exitEffect.time / this.exitEffect.duration);
@@ -3466,131 +3442,6 @@
         droplet: { moveStretch: 0.11, moveSqueeze: 0.05, collisionSquash: 0.24, collisionStretch: 0.17 }
       };
       return profiles[shape] || defaults;
-    }
-
-    getTrailStyle(trail) {
-      const palette = {
-        frost: { r: 255, g: 255, b: 255 },
-        cyan: { r: 116, g: 244, b: 255 },
-        gold: { r: 255, g: 220, b: 120 },
-        magma: { r: 255, g: 124, b: 92 },
-        neo: { r: 128, g: 160, b: 255 },
-        void: { r: 222, g: 142, b: 255 }
-      };
-      return palette[trail] || palette.frost;
-    }
-
-    resetTrailPath() {
-      const x = Number.isFinite(this.player?.renderX) ? this.player.renderX : 0;
-      const y = Number.isFinite(this.player?.renderY) ? this.player.renderY : 0;
-      this.trailPath = [{ x, y, age: 0 }];
-      this.trailSampleClock = 0;
-    }
-
-    pushTrailSample(delta) {
-      if (!this.trailPath) {
-        this.trailPath = [];
-      }
-      const coarse = this.performanceProfile.coarsePointer;
-      const moving = Boolean(this.moveState);
-      const lifetime = coarse ? (moving ? 0.14 : 0.1) : 0.18;
-      const maxPoints = coarse ? 6 : 12;
-      const sampleInterval = coarse ? 0.036 : 0.018;
-      const blendFactor = 1 - Math.exp(-Math.max(0.0001, delta) * 22);
-
-      for (let i = this.trailPath.length - 1; i >= 0; i -= 1) {
-        const sample = this.trailPath[i];
-        sample.age += delta;
-        if (sample.age > lifetime) {
-          this.trailPath.splice(i, 1);
-        }
-      }
-
-      const x = this.player.renderX;
-      const y = this.player.renderY;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        return;
-      }
-
-      this.trailSampleClock += delta;
-      const last = this.trailPath[this.trailPath.length - 1];
-      if (!last) {
-        this.trailPath.push({ x, y, age: 0 });
-        this.trailSampleClock = 0;
-      } else {
-        const dx = x - last.x;
-        const dy = y - last.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist > 0.035 || this.trailSampleClock >= sampleInterval) {
-          this.trailPath.push({ x, y, age: 0 });
-          this.trailSampleClock = 0;
-        } else {
-          last.x = this.lerp(last.x, x, blendFactor);
-          last.y = this.lerp(last.y, y, blendFactor);
-          last.age = Math.min(last.age, 0.01);
-        }
-      }
-
-      while (this.trailPath.length > maxPoints) {
-        this.trailPath.shift();
-      }
-    }
-
-    drawPlayerTrail(ctx, frameX, frameY, viewportWidth, viewportHeight, cellSize, trailStrength, freezeTint = 0, goldActive = false) {
-      if (!this.trailPath || this.trailPath.length < 1) {
-        return;
-      }
-      if (!this.moveState && this.trailPath.length < 2) {
-        return;
-      }
-
-      let trailColor = this.getTrailStyle(this.playerTrail);
-      if (freezeTint > 0.01) {
-        trailColor = { r: 255, g: 96, b: 96 };
-      } else if (goldActive) {
-        trailColor = { r: 255, g: 214, b: 88 };
-      }
-
-      const points = this.trailPath.map((sample) => {
-        const pos = this.toScreen(sample.x, sample.y);
-        return {
-          x: pos.x + cellSize / 2,
-          y: pos.y + cellSize / 2,
-          age: sample.age
-        };
-      });
-
-      const len = points.length;
-      if (len < 1) {
-        return;
-      }
-      const coarse = this.performanceProfile.coarsePointer;
-      const start = coarse ? Math.max(0, len - 6) : 0;
-      const step = coarse ? 2 : 1;
-      const intensity = 0.6 + trailStrength * 0.65;
-      const squareSize = cellSize * (0.14 + intensity * 0.03);
-      const glow = coarse ? 0 : (5 + intensity * 7);
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
-      ctx.clip();
-      if (glow > 0) {
-        ctx.shadowBlur = glow;
-        ctx.shadowColor = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${0.22 * intensity})`;
-      } else {
-        ctx.shadowBlur = 0;
-      }
-
-      for (let i = start; i < len; i += step) {
-        const point = points[i];
-        const ageFade = this.clamp(1 - point.age / 0.18, 0, 1);
-        const alpha = (0.08 + 0.1 * ageFade) * intensity * (coarse ? 0.92 : 1);
-        ctx.fillStyle = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${alpha})`;
-        ctx.fillRect(point.x - squareSize / 2, point.y - squareSize / 2, squareSize, squareSize);
-      }
-
-      ctx.restore();
     }
 
     drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY) {
@@ -4371,7 +4222,6 @@
         reducedEffects,
         dynamicFocusMask: !coarsePointer || !reducedEffects,
         glowStrength: coarsePointer ? (ultraCompact ? 0.54 : 0.72) : 1,
-        trailStrength: coarsePointer ? (ultraCompact ? 0.12 : 0.34) : 1,
         backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.56 : 0.72) : 1,
         pixelRatioCap,
         maxDelta: coarsePointer ? 0.16 : 0.1,

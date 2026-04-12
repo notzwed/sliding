@@ -8,8 +8,6 @@
   const TUTORIAL_COMPLETED_KEY = "slidey_tutorial_completed";
   const UNLOCKED_SHAPES_KEY = "slidey_unlocked_shapes";
   const SELECTED_SHAPE_KEY = "slidey_selected_shape";
-  const UNLOCKED_TRAILS_KEY = "slidey_unlocked_trails";
-  const SELECTED_TRAIL_KEY = "slidey_selected_trail";
   const DEVICE_ID_KEY = "slidey_device_id";
   const REMOTE_TABLE = "player_profiles";
   const CHALLENGE_TABLE = "challenge_presence";
@@ -43,7 +41,6 @@
   const challengeResultCloseBtn = document.getElementById("challengeResultCloseBtn");
   const shopOrbsValue = document.getElementById("shopOrbsValue");
   const shapeButtons = Array.from(document.querySelectorAll(".shop-button[data-shape]"));
-  const trailButtons = Array.from(document.querySelectorAll(".shop-button[data-trail]"));
 
   const SHAPE_CATALOG = [
     { shape: "square", cost: 0 },
@@ -57,15 +54,6 @@
     { shape: "droplet", cost: 430 }
   ];
   const ALLOWED_SHAPES = new Set(SHAPE_CATALOG.map((item) => item.shape));
-  const TRAIL_CATALOG = [
-    { trail: "frost", cost: 0 },
-    { trail: "cyan", cost: 40 },
-    { trail: "gold", cost: 85 },
-    { trail: "magma", cost: 120 },
-    { trail: "neo", cost: 160 },
-    { trail: "void", cost: 220 }
-  ];
-  const ALLOWED_TRAILS = new Set(TRAIL_CATALOG.map((item) => item.trail));
 
   let deferredInstallPrompt = null;
   let promptedOnce = false;
@@ -76,8 +64,6 @@
   let tutorialCompleted = false;
   let selectedShape = "square";
   let unlockedShapes = new Set(["square"]);
-  let selectedTrail = "frost";
-  let unlockedTrails = new Set(["frost"]);
   let levelTopCache = {};
   let challengePushTimer = null;
   let challengePullTimer = null;
@@ -392,31 +378,9 @@
     return new Set(["square"]);
   };
 
-  const readUnlockedTrails = () => {
-    const raw = window.localStorage.getItem(UNLOCKED_TRAILS_KEY);
-    if (!raw) {
-      return new Set(["frost"]);
-    }
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const safe = new Set(parsed.filter((value) => ALLOWED_TRAILS.has(value)));
-        safe.add("frost");
-        return safe;
-      }
-    } catch (_error) {
-    }
-    return new Set(["frost"]);
-  };
-
   const persistShapeState = () => {
     window.localStorage.setItem(UNLOCKED_SHAPES_KEY, JSON.stringify(Array.from(unlockedShapes)));
     window.localStorage.setItem(SELECTED_SHAPE_KEY, selectedShape);
-  };
-
-  const persistTrailState = () => {
-    window.localStorage.setItem(UNLOCKED_TRAILS_KEY, JSON.stringify(Array.from(unlockedTrails)));
-    window.localStorage.setItem(SELECTED_TRAIL_KEY, selectedTrail);
   };
 
   const getOrCreateDeviceId = () => {
@@ -457,13 +421,6 @@
     window.__slideyGame.setPlayerShape(selectedShape);
   };
 
-  const applyTrailToGame = () => {
-    if (!window.__slideyGame || typeof window.__slideyGame.setPlayerTrail !== "function") {
-      return;
-    }
-    window.__slideyGame.setPlayerTrail(selectedTrail);
-  };
-
   const updateShapeButtons = () => {
     for (const button of shapeButtons) {
       const shape = button.dataset.shape;
@@ -476,30 +433,6 @@
       }
       const unlocked = unlockedShapes.has(shape);
       const selected = selectedShape === shape;
-      button.classList.toggle("is-selected", selected);
-
-      if (unlocked) {
-        button.textContent = selected ? "Selected" : "Select";
-        button.disabled = selected;
-      } else {
-        button.textContent = walletOrbs >= config.cost ? "Buy" : `Need ${config.cost}`;
-        button.disabled = walletOrbs < config.cost;
-      }
-    }
-  };
-
-  const updateTrailButtons = () => {
-    for (const button of trailButtons) {
-      const trail = button.dataset.trail;
-      if (!trail) {
-        continue;
-      }
-      const config = TRAIL_CATALOG.find((item) => item.trail === trail);
-      if (!config) {
-        continue;
-      }
-      const unlocked = unlockedTrails.has(trail);
-      const selected = selectedTrail === trail;
       button.classList.toggle("is-selected", selected);
 
       if (unlocked) {
@@ -595,7 +528,6 @@
     hideChallengeMenu();
     updateMenuOrbsDisplay();
     updateShapeButtons();
-    updateTrailButtons();
     shopMenu.classList.remove("hidden");
     shopMenu.setAttribute("aria-hidden", "false");
   };
@@ -1045,7 +977,6 @@
     applyWalletToGame();
     applyProgressToGame();
     applyShapeToGame();
-    applyTrailToGame();
     window.__slideyGame.enterMenuDemo();
     void ensureLevelTopForLevel(window.__slideyGame.level || 1);
     const bestMs = typeof window.__slideyGame.getBestTimeMs === "function"
@@ -1054,7 +985,6 @@
     updateBestTimeDisplay(bestMs);
     updateMenuOrbsDisplay();
     updateShapeButtons();
-    updateTrailButtons();
     hideShopMenu();
     hideChallengeMenu();
     if (!tutorialCompleted) {
@@ -1177,13 +1107,6 @@
     updateShapeButtons();
   };
 
-  const setTrail = (trail) => {
-    selectedTrail = trail;
-    persistTrailState();
-    applyTrailToGame();
-    updateTrailButtons();
-  };
-
   const buyOrSelectShape = (shape, cost) => {
     const unlocked = unlockedShapes.has(shape);
     if (!unlocked) {
@@ -1196,18 +1119,6 @@
     setShape(shape);
   };
 
-  const buyOrSelectTrail = (trail, cost) => {
-    const unlocked = unlockedTrails.has(trail);
-    if (!unlocked) {
-      if (!spendOrbs(cost)) {
-        return;
-      }
-      unlockedTrails.add(trail);
-      persistTrailState();
-    }
-    setTrail(trail);
-  };
-
   const setLocalState = (nextWallet, nextHighestLevel) => {
     walletOrbs = Math.max(0, readNumber(nextWallet, walletOrbs));
     highestLevel = Math.max(1, readNumber(nextHighestLevel, highestLevel));
@@ -1217,7 +1128,6 @@
     applyProgressToGame();
     updateMenuOrbsDisplay();
     updateShapeButtons();
-    updateTrailButtons();
   };
 
   const setButtonLabel = () => {
@@ -1445,13 +1355,9 @@
     tutorialCompleted = window.localStorage.getItem(TUTORIAL_COMPLETED_KEY) === "1";
     levelTopCache = readLevelTopCache();
     unlockedShapes = readUnlockedShapes();
-    unlockedTrails = readUnlockedTrails();
     const storedShape = window.localStorage.getItem(SELECTED_SHAPE_KEY);
     selectedShape = unlockedShapes.has(storedShape) && ALLOWED_SHAPES.has(storedShape) ? storedShape : "square";
-    const storedTrail = window.localStorage.getItem(SELECTED_TRAIL_KEY);
-    selectedTrail = unlockedTrails.has(storedTrail) && ALLOWED_TRAILS.has(storedTrail) ? storedTrail : "frost";
     persistShapeState();
-    persistTrailState();
     if (challengeCodeValue) {
       challengeCodeValue.textContent = "------";
     }
@@ -1461,11 +1367,9 @@
     updateBestTimeDisplay(readNumber(window.localStorage.getItem(BEST_TIME_KEY), 0));
     updateMenuOrbsDisplay();
     updateShapeButtons();
-    updateTrailButtons();
     applyWalletToGame();
     applyProgressToGame();
     applyShapeToGame();
-    applyTrailToGame();
     bootstrapSupabase();
     refreshInstallGate();
 
@@ -1506,16 +1410,6 @@
         return;
       }
       buyOrSelectShape(shape, cost);
-    });
-  }
-  for (const button of trailButtons) {
-    button.addEventListener("click", () => {
-      const trail = button.dataset.trail;
-      const cost = readNumber(button.dataset.cost, 0);
-      if (!trail || !ALLOWED_TRAILS.has(trail)) {
-        return;
-      }
-      buyOrSelectTrail(trail, cost);
     });
   }
 
