@@ -1854,11 +1854,13 @@
 
       if (this.phase === "lost") {
         this.updateLoseOverlay(delta);
+        this.updateGhost(delta);
         this.updateCamera();
         return;
       }
 
       if (this.isTutorialDialogBlockingInput()) {
+        this.updateGhost(delta);
         this.updateCamera();
         this.updateHud();
         return;
@@ -1876,6 +1878,7 @@
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
       this.checkTutorialCheckpoint();
+      this.updateGhost(delta);
       this.updateCamera();
 
       if (this.isCollapsed(this.player.x, this.player.y)) {
@@ -1924,6 +1927,7 @@
       this.updateImpact(delta);
       this.collectOrbIfNeeded();
       this.checkTutorialCheckpoint();
+      this.updateGhost(delta);
       this.updateCamera();
 
       if (this.isCollapsed(this.player.x, this.player.y)) {
@@ -3350,7 +3354,9 @@
       ctx.beginPath();
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
-      ctx.globalAlpha = 0.34;
+      const ageMs = Math.max(0, now - (this.ghostState.updatedAt || now));
+      const fade = this.clamp(1 - ageMs / 4200, 0, 1);
+      ctx.globalAlpha = 0.18 + fade * 0.26;
       ctx.shadowBlur = 10;
       ctx.shadowColor = "rgba(180,230,255,0.5)";
       ctx.fillStyle = "rgba(180,230,255,0.9)";
@@ -3358,18 +3364,59 @@
       ctx.restore();
     }
 
+    updateGhost(delta) {
+      if (!this.isChallengeRun || !this.ghostState) {
+        return;
+      }
+      const state = this.ghostState;
+      if (!Number.isFinite(state.targetX) || !Number.isFinite(state.targetY)) {
+        return;
+      }
+      const speed = this.performanceProfile.isTouch ? 17 : 20;
+      const blend = 1 - Math.exp(-speed * Math.max(0, delta));
+      const predictLead = this.performanceProfile.isTouch ? 0.035 : 0.05;
+      const px = state.targetX + (state.velocityX || 0) * predictLead;
+      const py = state.targetY + (state.velocityY || 0) * predictLead;
+      state.renderX += (px - state.renderX) * blend;
+      state.renderY += (py - state.renderY) * blend;
+      state.x = state.targetX;
+      state.y = state.targetY;
+    }
+
     setGhostState(state) {
       if (!state || !Number.isFinite(state.x) || !Number.isFinite(state.y)) {
         return;
       }
-      this.ghostState = {
-        x: state.x,
-        y: state.y,
-        renderX: Number.isFinite(state.renderX) ? state.renderX : state.x,
-        renderY: Number.isFinite(state.renderY) ? state.renderY : state.y,
-        shape: state.shape,
-        updatedAt: Date.now()
-      };
+      const nextTargetX = Number.isFinite(state.renderX) ? state.renderX : state.x;
+      const nextTargetY = Number.isFinite(state.renderY) ? state.renderY : state.y;
+      const now = Date.now();
+      if (!this.ghostState) {
+        this.ghostState = {
+          x: state.x,
+          y: state.y,
+          targetX: nextTargetX,
+          targetY: nextTargetY,
+          renderX: nextTargetX,
+          renderY: nextTargetY,
+          velocityX: 0,
+          velocityY: 0,
+          shape: state.shape,
+          updatedAt: now,
+          lastTargetAt: now
+        };
+        return;
+      }
+      const prev = this.ghostState;
+      const dt = Math.max(0.001, (now - (prev.lastTargetAt || now)) / 1000);
+      const vx = (nextTargetX - prev.targetX) / dt;
+      const vy = (nextTargetY - prev.targetY) / dt;
+      prev.targetX = nextTargetX;
+      prev.targetY = nextTargetY;
+      prev.velocityX = this.clamp(vx, -30, 30);
+      prev.velocityY = this.clamp(vy, -30, 30);
+      prev.shape = state.shape;
+      prev.updatedAt = now;
+      prev.lastTargetAt = now;
     }
 
     clearGhostState() {

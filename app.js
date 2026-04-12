@@ -12,9 +12,12 @@
   const REMOTE_TABLE = "player_profiles";
   const CHALLENGE_TABLE = "challenge_presence";
   const LEVEL_RECORDS_TABLE = "level_records";
+  const REMOTE_COMMIT_API = "https://api.github.com/repos/notzwed/sliding/commits/main";
+  const LAST_REMOTE_COMMIT_KEY = "slidey_last_remote_commit";
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
+  const appUpdateBtn = document.getElementById("appUpdateBtn");
   const startMenu = document.getElementById("startMenu");
   const bestTimeValue = document.getElementById("bestTimeValue");
   const menuOrbsValue = document.getElementById("menuOrbsValue");
@@ -71,6 +74,10 @@
   let challengeLocalResult = null;
   let challengeOpponentResult = null;
   let challengeResultShown = false;
+  let swRegistration = null;
+  let appUpdateReady = false;
+  let latestRemoteCommitSha = "";
+  let swControllerReloaded = false;
 
   const isIos = () => /iPad|iPhone|iPod/.test(window.navigator.userAgent) ||
     (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
@@ -83,6 +90,23 @@
     Boolean(window.matchMedia && window.matchMedia("(pointer: coarse)").matches) || isIos();
 
   const shouldRequireInstall = () => isInstallTargetDevice() && !isStandalone();
+
+  const showAppUpdateButton = (label = "Update Available") => {
+    if (!appUpdateBtn) {
+      return;
+    }
+    appUpdateBtn.textContent = label;
+    appUpdateBtn.classList.remove("hidden");
+    appUpdateBtn.setAttribute("aria-hidden", "false");
+  };
+
+  const hideAppUpdateButton = () => {
+    if (!appUpdateBtn) {
+      return;
+    }
+    appUpdateBtn.classList.add("hidden");
+    appUpdateBtn.setAttribute("aria-hidden", "true");
+  };
 
   const setupClientHardening = () => {
     // Browser devtools cannot be fully blocked, this only adds lightweight client-side deterrence.
@@ -101,6 +125,91 @@
         event.stopPropagation();
       }
     }, { capture: true });
+  };
+
+  const markRemoteCommitSeen = (sha) => {
+    if (!sha) {
+      return;
+    }
+    window.localStorage.setItem(LAST_REMOTE_COMMIT_KEY, sha);
+  };
+
+  const getSeenRemoteCommit = () => window.localStorage.getItem(LAST_REMOTE_COMMIT_KEY) || "";
+
+  const applyPendingUpdate = () => {
+    if (!swRegistration) {
+      return;
+    }
+    const waiting = swRegistration.waiting;
+    if (waiting) {
+      waiting.postMessage({ type: "SKIP_WAITING" });
+      return;
+    }
+    void swRegistration.update();
+  };
+
+  const handleUpdateReady = () => {
+    appUpdateReady = true;
+    showAppUpdateButton("Update Ready");
+    if (isStandalone()) {
+      window.setTimeout(() => {
+        applyPendingUpdate();
+      }, 250);
+    }
+  };
+
+  const monitorServiceWorkerRegistration = (registration) => {
+    if (!registration) {
+      return;
+    }
+    swRegistration = registration;
+    if (registration.waiting) {
+      handleUpdateReady();
+    }
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) {
+        return;
+      }
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          handleUpdateReady();
+        }
+      });
+    });
+  };
+
+  const checkForRemoteCommitUpdate = async () => {
+    try {
+      const response = await fetch(REMOTE_COMMIT_API, {
+        method: "GET",
+        cache: "no-store"
+      });
+      if (!response.ok) {
+        return;
+      }
+      const payload = await response.json();
+      const sha = typeof payload?.sha === "string" ? payload.sha : "";
+      if (!sha) {
+        return;
+      }
+      latestRemoteCommitSha = sha;
+      const seen = getSeenRemoteCommit();
+      if (!seen) {
+        markRemoteCommitSeen(sha);
+        return;
+      }
+      if (sha !== seen) {
+        showAppUpdateButton("Update Ready");
+        if (swRegistration) {
+          await swRegistration.update();
+          if (swRegistration.waiting) {
+            handleUpdateReady();
+          }
+        }
+      }
+    } catch (_error) {
+    }
   };
 
   const readNumber = (value, fallback) => {
@@ -715,7 +824,7 @@
         }
       });
       maybeResolveChallengeResult();
-    }, 140);
+    }, 85);
 
     challengePullTimer = window.setInterval(async () => {
       if (!challengeRoom) {
@@ -755,7 +864,7 @@
         shape: row.shape
       });
       maybeResolveChallengeResult();
-    }, 220);
+    }, 85);
   };
 
   const launchChallenge = (info) => {
@@ -1276,16 +1385,39 @@
     displayModeQuery.addEventListener?.("change", refreshInstallGate);
   }
 
+  appUpdateBtn?.addEventListener("click", () => {
+    applyPendingUpdate();
+  });
+
   if ("serviceWorker" in navigator) {
     window.addEventListener(
       "load",
       () => {
-        navigator.serviceWorker.register("./sw.js").catch(() => {
+        navigator.serviceWorker.register("./sw.js").then((registration) => {
+          monitorServiceWorkerRegistration(registration);
+          void registration.update();
+          void checkForRemoteCommitUpdate();
+          window.setInterval(() => {
+            void checkForRemoteCommitUpdate();
+          }, 90000);
+        }).catch(() => {
         });
       },
       { once: true }
     );
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (swControllerReloaded) {
+        return;
+      }
+      swControllerReloaded = true;
+      if (latestRemoteCommitSha) {
+        markRemoteCommitSeen(latestRemoteCommitSha);
+      }
+      window.location.reload();
+    });
   }
 
+  hideAppUpdateButton();
   init();
 })();
