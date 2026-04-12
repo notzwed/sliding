@@ -96,6 +96,10 @@
       this.ghostState = null;
       this.tutorialStep = 0;
       this.demoStepCooldown = 0;
+      this.demoPrevStopKey = "";
+      this.demoLastStopKey = "";
+      this.demoLastDir = { dx: 0, dy: 0 };
+      this.demoRepeatCount = 0;
       this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
       this.performanceProfile = this.computePerformanceProfile(window.innerWidth, window.innerHeight);
       this.boardMetrics = null;
@@ -355,6 +359,11 @@
         renderX: this.levelData.start.x,
         renderY: this.levelData.start.y,
       };
+      const startKey = this.cellKey(this.player.x, this.player.y);
+      this.demoPrevStopKey = "";
+      this.demoLastStopKey = startKey;
+      this.demoLastDir = { dx: 0, dy: 0 };
+      this.demoRepeatCount = 0;
       this.moveState = null;
       this.pendingDirection = null;
       this.levelTime = 0;
@@ -1984,23 +1993,18 @@
 
       this.demoStepCooldown -= delta;
       if (this.demoStepCooldown <= 0 && !this.moveState && !this.pendingDirection) {
-        const moves = [
-          { dx: 1, dy: 0 },
-          { dx: -1, dy: 0 },
-          { dx: 0, dy: 1 },
-          { dx: 0, dy: -1 }
-        ];
-        for (let i = moves.length - 1; i > 0; i -= 1) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [moves[i], moves[j]] = [moves[j], moves[i]];
-        }
-        for (const move of moves) {
-          const path = this.findSlidePath(move.dx, move.dy);
-          if (path.length > 1) {
-            this.queueMove(move.dx, move.dy, true);
-            this.demoStepCooldown = 0.12 + Math.random() * 0.18;
-            break;
+        const choice = this.chooseMenuDemoMove();
+        if (choice) {
+          this.queueMove(choice.dx, choice.dy, true);
+          this.demoPrevStopKey = this.demoLastStopKey;
+          this.demoLastStopKey = choice.toKey;
+          if (choice.dx === this.demoLastDir.dx && choice.dy === this.demoLastDir.dy) {
+            this.demoRepeatCount = Math.min(5, this.demoRepeatCount + 1);
+          } else {
+            this.demoRepeatCount = 0;
           }
+          this.demoLastDir = { dx: choice.dx, dy: choice.dy };
+          this.demoStepCooldown = 0.08 + Math.min(0.26, choice.distance * 0.016) + Math.random() * 0.08;
         }
       }
 
@@ -2102,6 +2106,107 @@
       }
 
       return safePath;
+    }
+
+    chooseMenuDemoMove() {
+      const directions = [
+        { dx: 0, dy: -1 },
+        { dx: 1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 },
+      ];
+      for (let i = directions.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [directions[i], directions[j]] = [directions[j], directions[i]];
+      }
+
+      let best = null;
+      for (const dir of directions) {
+        const path = this.findSlidePath(dir.dx, dir.dy);
+        if (path.length <= 1) {
+          continue;
+        }
+        const score = this.scoreMenuDemoMove(path, dir.dx, dir.dy);
+        if (!best || score > best.score) {
+          const to = path[path.length - 1];
+          best = {
+            dx: dir.dx,
+            dy: dir.dy,
+            score,
+            distance: path.length - 1,
+            toKey: this.cellKey(to.x, to.y),
+          };
+        }
+      }
+      return best;
+    }
+
+    scoreMenuDemoMove(path, dx, dy) {
+      const from = path[0];
+      const to = path[path.length - 1];
+      const toKey = this.cellKey(to.x, to.y);
+      let score = 0;
+
+      let normalCollected = 0;
+      for (let i = 1; i < path.length; i += 1) {
+        const cell = path[i];
+        const orb = this.levelData.orbCells.get(this.cellKey(cell.x, cell.y));
+        if (orb && !orb.collected && (orb.type || "normal") === "normal") {
+          normalCollected += 1;
+        }
+      }
+      score += normalCollected * 220;
+
+      let remainingNormal = 0;
+      for (const orb of this.levelData.orbCells.values()) {
+        if (!orb.collected && (orb.type || "normal") === "normal") {
+          remainingNormal += 1;
+        }
+      }
+      const hasRemainingNormal = remainingNormal > 0;
+      if (hasRemainingNormal) {
+        let nearestNormal = Infinity;
+        for (const orb of this.levelData.orbCells.values()) {
+          if (orb.collected || (orb.type || "normal") !== "normal") {
+            continue;
+          }
+          const manhattan = Math.abs(orb.x - to.x) + Math.abs(orb.y - to.y);
+          if (manhattan < nearestNormal) {
+            nearestNormal = manhattan;
+          }
+        }
+        if (Number.isFinite(nearestNormal)) {
+          score -= nearestNormal * 5.2;
+        }
+      }
+
+      const exitDist = Math.abs(this.levelData.exit.x - to.x) + Math.abs(this.levelData.exit.y - to.y);
+      score -= exitDist * (hasRemainingNormal ? 1.9 : 6.5);
+
+      score += (from.y - to.y) * 7.5;
+      score += (path.length - 1) * 1.6;
+
+      if (toKey === this.demoPrevStopKey) {
+        score -= 46;
+      }
+      if (toKey === this.demoLastStopKey) {
+        score -= 140;
+      }
+      if (dx === this.demoLastDir.dx && dy === this.demoLastDir.dy) {
+        score -= 16 + this.demoRepeatCount * 10;
+      }
+
+      const collapseTime = this.levelData.collapseAt[to.y]?.[to.x] ?? Infinity;
+      const timeLeft = collapseTime - this.levelTime;
+      if (timeLeft < 0.9) {
+        score -= 280;
+      } else if (timeLeft < 1.35) {
+        score -= 85;
+      } else if (timeLeft < 1.8) {
+        score -= 35;
+      }
+
+      return score;
     }
 
     canMoveTo(x, y) {
