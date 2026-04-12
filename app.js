@@ -445,12 +445,17 @@
     }
   };
 
+  const setMenuDemoUiHidden = (hidden) => {
+    document.body.classList.toggle("menu-demo-ui-hidden", Boolean(hidden));
+  };
+
   const hideStartMenu = () => {
     if (!startMenu) {
       return;
     }
     startMenu.classList.add("hidden");
     startMenu.setAttribute("aria-hidden", "true");
+    setMenuDemoUiHidden(false);
   };
 
   const showStartMenu = () => {
@@ -459,6 +464,7 @@
     }
     startMenu.classList.remove("hidden");
     startMenu.setAttribute("aria-hidden", "false");
+    setMenuDemoUiHidden(true);
   };
 
   const hideShopMenu = () => {
