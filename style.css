@@ -901,7 +901,8 @@ body.install-locked .app-shell {
 .challenge-code-value {
   font-family: var(--font-display);
   font-size: clamp(1.1rem, 5vw, 1.6rem);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
   color: rgba(255, 255, 255, 0.95);
 }
 
@@ -1256,6 +1257,21 @@ body.install-locked .app-shell {
     opacity: 0.12;
     filter: blur(12px);
     animation: none;
+  }
+
+  .menu-button,
+  .challenge-action,
+  .challenge-copy,
+  .challenge-close,
+  .challenge-result-close,
+  .tutorial-dialog-next,
+  .interlude-button {
+    min-height: 54px;
+  }
+
+  .challenge-code-value {
+    font-size: clamp(1.25rem, 6.2vw, 1.9rem);
+    letter-spacing: 0.24em;
   }
 
   .start-menu {

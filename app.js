@@ -10,7 +10,6 @@
   const DEVICE_ID_KEY = "slidey_device_id";
   const REMOTE_TABLE = "player_profiles";
   const CHALLENGE_TABLE = "challenge_presence";
-  const CHALLENGE_PREFIX = "SLD";
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
@@ -408,9 +407,7 @@
     const level = Math.max(1, Math.min(highestLevel, 99));
     const seed = hashStringToSeed(`${room}:${level}`);
     const startAtMs = Date.now() + 15000;
-    const levelToken = level.toString(36).toUpperCase().padStart(2, "0");
-    const startToken = Math.floor(startAtMs / 1000).toString(36).toUpperCase();
-    const code = `${CHALLENGE_PREFIX}-${room}-${levelToken}-${startToken}`;
+    const code = room;
     return { room, seed, level, startAtMs, code };
   };
 
@@ -418,25 +415,83 @@
     if (!raw || typeof raw !== "string") {
       return null;
     }
-    const code = raw.trim().toUpperCase();
-    const match = /^SLD-([A-Z0-9]{5})-([A-Z0-9]{2})-([A-Z0-9]+)$/.exec(code);
-    if (!match) {
+    const normalized = raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!/^[A-Z0-9]{5}$/.test(normalized)) {
       return null;
     }
-    const room = match[1];
-    const level = Number.parseInt(match[2], 36);
-    const startAtSec = Number.parseInt(match[3], 36);
-    if (!Number.isFinite(level) || !Number.isFinite(startAtSec)) {
+    const room = normalized;
+    const seed = hashStringToSeed(`${room}:${highestLevel}`);
+    return {
+      code: room,
+      room,
+      seed: seed >>> 0,
+      level: Math.max(1, Math.min(99, highestLevel)),
+      startAtMs: Date.now() + 15000
+    };
+  };
+
+  const parseWaitingToken = (phaseToken) => {
+    if (typeof phaseToken !== "string") {
+      return null;
+    }
+    const parts = phaseToken.split("|");
+    if (parts[0] !== "waiting" || parts.length < 3) {
+      return null;
+    }
+    const startAtSec = Number.parseInt(parts[1], 10);
+    const level = Number.parseInt(parts[2], 10);
+    if (!Number.isFinite(startAtSec) || !Number.isFinite(level)) {
       return null;
     }
     const hostLevel = Math.max(1, Math.min(99, Math.floor(level)));
-    const seed = hashStringToSeed(`${room}:${hostLevel}`);
     return {
-      code,
-      room,
-      seed: seed >>> 0,
-      level: hostLevel,
-      startAtMs: Math.floor(startAtSec) * 1000
+      startAtMs: startAtSec * 1000,
+      level: hostLevel
+    };
+  };
+
+  const publishChallengeLobby = async (info) => {
+    if (!supabaseClient) {
+      return;
+    }
+    const waitingToken = `waiting|${Math.floor(info.startAtMs / 1000)}|${info.level}`;
+    const payload = {
+      challenge_code: info.room,
+      device_id: deviceId,
+      level: info.level,
+      pos_x: 0,
+      pos_y: 0,
+      render_x: 0,
+      render_y: 0,
+      shape: selectedShape,
+      phase: waitingToken,
+      updated_at: new Date().toISOString()
+    };
+    await supabaseClient.from(CHALLENGE_TABLE).upsert(payload, { onConflict: "challenge_code,device_id" });
+  };
+
+  const resolveChallengeLobby = async (room) => {
+    if (!supabaseClient) {
+      return null;
+    }
+    const { data, error } = await supabaseClient
+      .from(CHALLENGE_TABLE)
+      .select("level,phase,updated_at")
+      .eq("challenge_code", room)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (error) {
+      return null;
+    }
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) {
+      return null;
+    }
+    const waiting = parseWaitingToken(row.phase || "");
+    const hostLevel = Math.max(1, Math.min(99, readNumber(row.level, 1)));
+    return {
+      level: waiting?.level || hostLevel,
+      startAtMs: waiting?.startAtMs || (Date.now() + 10000)
     };
   };
 
@@ -511,7 +566,7 @@
       const youFirst = challengeLocalResult.runMs <= challengeOpponentResult.runMs;
       first = youFirst ? "YOU" : "OPPONENT";
       last = youFirst ? "OPPONENT" : "YOU";
-      detail = `Finish times — You: ${formatTime(challengeLocalResult.runMs)} | Opponent: ${formatTime(challengeOpponentResult.runMs)}`;
+      detail = `Finish times - You: ${formatTime(challengeLocalResult.runMs)} | Opponent: ${formatTime(challengeOpponentResult.runMs)}`;
     } else if (challengeLocalResult.phase === "won" && challengeOpponentResult.phase === "lost") {
       first = "YOU";
       last = "OPPONENT";
@@ -733,20 +788,50 @@
       challengeCodeValue.textContent = info.code;
     }
     copyChallengeBtn?.classList.remove("hidden");
-    setChallengeStatus("Code created. Share it with your friend. Countdown is live.");
+    setChallengeStatus("Code created. Share these 5 characters with your friend.");
+    if (supabaseClient) {
+      void publishChallengeLobby(info).then(() => {
+        launchChallenge(info);
+      }).catch(() => {
+        setChallengeStatus("Unable to publish challenge lobby.");
+      });
+      return;
+    }
     launchChallenge(info);
   };
 
-  const joinChallenge = () => {
-    const raw = window.prompt("Enter a challenge code");
+  const joinChallenge = async () => {
+    const raw = window.prompt("Enter the 5-character challenge code");
     if (!raw) {
       return;
     }
-    const info = parseChallengeCode(raw);
-    if (!info) {
-      setChallengeStatus("Invalid code.");
+    const parsed = parseChallengeCode(raw);
+    if (!parsed) {
+      setChallengeStatus("Invalid code. Use exactly 5 characters.");
       return;
     }
+
+    let level = parsed.level;
+    let startAtMs = parsed.startAtMs;
+    if (supabaseClient) {
+      const lobby = await resolveChallengeLobby(parsed.room);
+      if (!lobby) {
+      setChallengeStatus("Host lobby not found for this 5-character code.");
+        return;
+      }
+      level = lobby.level;
+      startAtMs = lobby.startAtMs;
+    }
+
+    const seed = hashStringToSeed(`${parsed.room}:${level}`);
+    const info = {
+      code: parsed.code,
+      room: parsed.room,
+      level,
+      seed,
+      startAtMs
+    };
+
     if (info.startAtMs < Date.now() - 1000) {
       setChallengeStatus("Code expired. Ask for a fresh challenge code.");
       return;
@@ -971,7 +1056,7 @@
       challengeCodeValue.textContent = "------";
     }
     copyChallengeBtn?.classList.add("hidden");
-    setChallengeStatus("Create or enter a challenge code.");
+    setChallengeStatus("Create or enter a 5-character challenge code.");
     hideChallengeResultScreen();
     updateBestTimeDisplay(readNumber(window.localStorage.getItem(BEST_TIME_KEY), 0));
     updateMenuOrbsDisplay();

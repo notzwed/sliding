@@ -4099,22 +4099,22 @@
       const viewportArea = Math.max(1, shortEdge * longEdge);
       const ultraCompact = coarsePointer && shortEdge < 420;
       const reducedEffects = coarsePointer && shortEdge < 360;
-      const renderBudget = coarsePointer ? 3200000 : 5600000;
+      const renderBudget = coarsePointer ? (ultraCompact ? 1850000 : 2450000) : 5600000;
       const adaptiveCap = Math.sqrt(renderBudget / viewportArea);
-      const pixelRatioCap = this.clamp(adaptiveCap, 1.4, coarsePointer ? 2.35 : 3);
+      const pixelRatioCap = this.clamp(adaptiveCap, 1.15, coarsePointer ? (ultraCompact ? 1.45 : 1.75) : 3);
 
       return {
         isTouch: coarsePointer,
         isPhone: ultraCompact,
         reducedEffects,
-        dynamicFocusMask: !reducedEffects,
-        glowStrength: coarsePointer ? (ultraCompact ? 0.78 : 0.95) : 1,
-        trailStrength: coarsePointer ? (ultraCompact ? 0.24 : 0.62) : 1,
-        backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.82 : 0.95) : 1,
+        dynamicFocusMask: !coarsePointer || !reducedEffects,
+        glowStrength: coarsePointer ? (ultraCompact ? 0.54 : 0.72) : 1,
+        trailStrength: coarsePointer ? (ultraCompact ? 0.12 : 0.34) : 1,
+        backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.56 : 0.72) : 1,
         pixelRatioCap,
-        maxDelta: coarsePointer ? 0.18 : 0.1,
+        maxDelta: coarsePointer ? 0.16 : 0.1,
         slideDurationScale: coarsePointer ? (ultraCompact ? 0.86 : 0.92) : 0.98,
-        ambientParticleCount: coarsePointer ? (ultraCompact ? 3 : 6) : 14,
+        ambientParticleCount: coarsePointer ? (ultraCompact ? 2 : 4) : 14,
       };
     }
 
