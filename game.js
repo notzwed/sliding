@@ -461,55 +461,62 @@
       const layouts = [
         {
           floorCells: [
-            [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
-            [3, 8], [3, 7], [3, 6], [3, 5], [3, 4], [3, 3],
-            [4, 3], [5, 3], [6, 3], [7, 3], [8, 3], [9, 3],
-            [9, 2], [9, 1], [9, 4], [9, 5], [9, 6], [9, 7], [9, 8]
+            [1, 9], [1, 8], [1, 7], [1, 6],
+            [2, 6], [3, 6], [4, 6],
+            [4, 5], [4, 4], [4, 3],
+            [5, 3], [6, 3], [7, 3],
+            [7, 2], [7, 1],
+            [8, 1], [9, 1]
           ],
           start: { x: 1, y: 9 },
           exit: { x: 9, y: 1 },
           orbs: [
-            { x: 5, y: 9, type: "normal" },
+            { x: 3, y: 6, type: "normal" },
+            { x: 6, y: 3, type: "normal" }
+          ],
+          checkpoints: {
+            reach_stage1_corner: { x: 4, y: 3 }
+          }
+        },
+        {
+          floorCells: [
+            [1, 9], [1, 8], [1, 7], [1, 6], [1, 5],
+            [2, 5], [3, 5], [4, 5], [5, 5],
+            [5, 4], [5, 3],
+            [6, 3], [7, 3], [8, 3],
+            [8, 2], [8, 1],
+            [9, 1]
+          ],
+          start: { x: 1, y: 9 },
+          exit: { x: 9, y: 1 },
+          orbs: [
+            { x: 5, y: 3, type: "freeze" },
             { x: 7, y: 3, type: "normal" }
           ],
           checkpoints: {
-            reach_stage1_corner: { x: 3, y: 3 }
+            reach_stage2_mid: { x: 5, y: 5 }
           }
         },
         {
           floorCells: [
-            [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
-            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3],
-            [8, 7], [7, 7], [6, 7], [5, 7],
-            [5, 6], [5, 5], [6, 5], [7, 5], [8, 5]
-          ],
-          start: { x: 1, y: 9 },
-          exit: { x: 9, y: 3 },
-          orbs: [
-            { x: 5, y: 7, type: "freeze" },
-            { x: 7, y: 5, type: "normal" }
-          ],
-          checkpoints: {
-            reach_stage2_mid: { x: 9, y: 5 }
-          }
-        },
-        {
-          floorCells: [
-            [1, 9], [2, 9], [3, 9], [4, 9], [5, 9], [6, 9], [7, 9], [8, 9], [9, 9],
-            [9, 8], [9, 7], [9, 6], [9, 5], [9, 4], [9, 3], [9, 2], [9, 1],
-            [8, 8], [7, 8], [6, 8],
-            [6, 7], [6, 6], [7, 6], [8, 6]
+            [1, 9], [1, 8], [1, 7], [1, 6],
+            [2, 6], [3, 6], [4, 6],
+            [4, 5], [4, 4],
+            [5, 4], [6, 4], [7, 4],
+            [7, 3], [7, 2],
+            [8, 2], [9, 2],
+            [9, 1]
           ],
           start: { x: 1, y: 9 },
           exit: { x: 9, y: 1 },
           orbs: [
-            { x: 6, y: 8, type: "multiplier" },
-            { x: 8, y: 6, type: "normal" },
-            { x: 9, y: 5, type: "normal" }
+            { x: 6, y: 4, type: "multiplier" },
+            { x: 8, y: 2, type: "normal" },
+            { x: 9, y: 2, type: "normal" }
           ],
           checkpoints: {
-            reach_stage3_branch: { x: 6, y: 8 },
-            reach_stage3_lane: { x: 8, y: 6 }
+            reach_stage3_branch: { x: 4, y: 6 },
+            reach_stage3_lane: { x: 7, y: 2 }
           }
         }
       ];
@@ -1900,6 +1907,17 @@
       }
 
       if (this.player.x === this.levelData.exit.x && this.player.y === this.levelData.exit.y) {
+        if (this.isTutorialRun) {
+          const waiting = this.tutorialFlow?.waitingFor || null;
+          if (waiting && waiting !== "complete_stage") {
+            this.setStatusText(
+              "Complete the current tutorial step before closing the gate.",
+              "Complete the step before the gate."
+            );
+            return;
+          }
+          this.satisfyTutorialWait("complete_stage");
+        }
         this.beginExitSequence();
         return;
       }
