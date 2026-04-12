@@ -3491,9 +3491,11 @@
       if (!this.trailPath) {
         this.trailPath = [];
       }
-      const lifetime = 0.42;
-      const maxPoints = this.performanceProfile.coarsePointer ? 14 : 20;
-      const sampleInterval = this.performanceProfile.coarsePointer ? 0.04 : 0.026;
+      const coarse = this.performanceProfile.coarsePointer;
+      const moving = Boolean(this.moveState);
+      const lifetime = coarse ? (moving ? 0.14 : 0.1) : 0.18;
+      const maxPoints = coarse ? 6 : 12;
+      const sampleInterval = coarse ? 0.036 : 0.018;
       const blendFactor = 1 - Math.exp(-Math.max(0.0001, delta) * 22);
 
       for (let i = this.trailPath.length - 1; i >= 0; i -= 1) {
@@ -3535,7 +3537,10 @@
     }
 
     drawPlayerTrail(ctx, frameX, frameY, viewportWidth, viewportHeight, cellSize, trailStrength, freezeTint = 0, goldActive = false) {
-      if (!this.trailPath || this.trailPath.length < 2) {
+      if (!this.trailPath || this.trailPath.length < 1) {
+        return;
+      }
+      if (!this.moveState && this.trailPath.length < 2) {
         return;
       }
 
@@ -3550,48 +3555,40 @@
         const pos = this.toScreen(sample.x, sample.y);
         return {
           x: pos.x + cellSize / 2,
-          y: pos.y + cellSize / 2
+          y: pos.y + cellSize / 2,
+          age: sample.age
         };
       });
 
       const len = points.length;
-      if (len < 2) {
+      if (len < 1) {
         return;
       }
-      const intensity = 0.5 + trailStrength * 0.9;
+      const coarse = this.performanceProfile.coarsePointer;
+      const start = coarse ? Math.max(0, len - 6) : 0;
+      const step = coarse ? 2 : 1;
+      const intensity = 0.6 + trailStrength * 0.65;
+      const squareSize = cellSize * (0.14 + intensity * 0.03);
+      const glow = coarse ? 0 : (5 + intensity * 7);
 
       ctx.save();
       ctx.beginPath();
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      for (let i = 1; i < len; i += 1) {
-        const a = points[i - 1];
-        const b = points[i];
-        const freshness = i / (len - 1);
-        const alpha = (0.035 + 0.22 * freshness * freshness) * intensity;
-        const width = cellSize * (0.06 + 0.11 * freshness) * (0.72 + intensity * 0.42);
-
-        ctx.strokeStyle = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${alpha})`;
-        ctx.shadowBlur = Math.max(5, 10 * intensity * freshness);
-        ctx.shadowColor = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${alpha * 1.4})`;
-        ctx.lineWidth = Math.max(1.2, width);
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
+      if (glow > 0) {
+        ctx.shadowBlur = glow;
+        ctx.shadowColor = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${0.22 * intensity})`;
+      } else {
+        ctx.shadowBlur = 0;
       }
 
-      const head = points[len - 1];
-      const pulse = 0.9 + Math.sin(this.levelTime * 6.4) * 0.1;
-      ctx.shadowBlur = 16 * intensity;
-      ctx.shadowColor = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${0.28 * intensity})`;
-      ctx.fillStyle = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${0.14 + intensity * 0.16})`;
-      ctx.beginPath();
-      ctx.arc(head.x, head.y, cellSize * 0.15 * pulse, 0, Math.PI * 2);
-      ctx.fill();
+      for (let i = start; i < len; i += step) {
+        const point = points[i];
+        const ageFade = this.clamp(1 - point.age / 0.18, 0, 1);
+        const alpha = (0.08 + 0.1 * ageFade) * intensity * (coarse ? 0.92 : 1);
+        ctx.fillStyle = `rgba(${trailColor.r},${trailColor.g},${trailColor.b},${alpha})`;
+        ctx.fillRect(point.x - squareSize / 2, point.y - squareSize / 2, squareSize, squareSize);
+      }
 
       ctx.restore();
     }
