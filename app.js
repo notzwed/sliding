@@ -17,9 +17,11 @@
   const LAST_REMOTE_COMMIT_KEY = "slidey_last_remote_commit";
   const DAILY_RUN_CACHE_KEY = "slidey_daily_cache_v1";
   const DAILY_ATTEMPTS_KEY = "slidey_daily_attempts_v1";
+  const DAILY_REWARD_CLAIMS_KEY = "slidey_daily_reward_claims_v1";
   const DAILY_LEVEL = 10;
   const DAILY_UNLOCK_LEVEL = 10;
   const DAILY_MAX_ATTEMPTS = 3;
+  const DAILY_LEADERBOARD_LIMIT = 10;
   const GLOBAL_LEADERBOARD_LIMIT = 50;
   const ACTIVE_LEADERBOARD_WINDOW_MS = 2 * 60 * 60 * 1000;
 
@@ -668,13 +670,14 @@
       return;
     }
     dailyLeaderboardList.textContent = "";
-    if (!dailyLeaderboard.length) {
+    const visibleEntries = Array.isArray(dailyLeaderboard) ? dailyLeaderboard.slice(0, DAILY_LEADERBOARD_LIMIT) : [];
+    if (!visibleEntries.length) {
       const empty = document.createElement("li");
       empty.textContent = "No runs yet for today.";
       dailyLeaderboardList.appendChild(empty);
       return;
     }
-    dailyLeaderboard.forEach((entry, index) => {
+    visibleEntries.forEach((entry, index) => {
       const li = document.createElement("li");
       const mark = entry.device_id === deviceId ? " (You)" : "";
       li.textContent = `#${index + 1} ${entry.player_alias || "Player"}${mark} - ${formatTime(entry.time_ms)}`;
@@ -956,6 +959,7 @@
     dailyMenu.setAttribute("aria-hidden", "false");
     setDailyStatusWithAccess("Loading daily leaderboard...");
     renderDailyLeaderboard();
+    void processDailyTopRewards();
     void refreshDailyLeaderboard();
   };
 
@@ -1127,7 +1131,7 @@
     }
     const remaining = getDailyAttemptsRemaining(key);
     if (remaining <= 0) {
-      setDailyStatus(`No Daily attempts left (${DAILY_MAX_ATTEMPTS}/${DAILY_MAX_ATTEMPTS}). Reset at 00:00 UTC.`);
+      setDailyStatus(`No Daily attempts left (${DAILY_MAX_ATTEMPTS}/${DAILY_MAX_ATTEMPTS}). Reset at 06:00 Italy.`);
       return;
     }
     const suffix = `Attempts left: ${remaining}/${DAILY_MAX_ATTEMPTS}.`;
@@ -1171,11 +1175,54 @@
     }
   };
 
+  const getRomeDateParts = (date = new Date()) => {
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Rome",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    });
+    const parts = formatter.formatToParts(date);
+    const map = {};
+    for (const part of parts) {
+      if (part.type !== "literal") {
+        map[part.type] = part.value;
+      }
+    }
+    return {
+      year: readNumber(map.year, 1970),
+      month: readNumber(map.month, 1),
+      day: readNumber(map.day, 1),
+      hour: readNumber(map.hour, 0)
+    };
+  };
+
+  const toDateKey = (year, month, day) =>
+    `${String(year).padStart(4, "0")}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
+
+  const shiftDateKey = (dateKey, days) => {
+    if (!/^\d{8}$/.test(dateKey || "")) {
+      return dateKey;
+    }
+    const y = Number.parseInt(dateKey.slice(0, 4), 10);
+    const m = Number.parseInt(dateKey.slice(4, 6), 10) - 1;
+    const d = Number.parseInt(dateKey.slice(6, 8), 10);
+    const dt = new Date(Date.UTC(y, m, d));
+    dt.setUTCDate(dt.getUTCDate() + days);
+    return toDateKey(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+  };
+
   const getDailyDateKey = (date = new Date()) => {
-    const y = date.getUTCFullYear();
-    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(date.getUTCDate()).padStart(2, "0");
-    return `${y}${m}${d}`;
+    const romeNow = getRomeDateParts(date);
+    if (romeNow.hour >= 6) {
+      return toDateKey(romeNow.year, romeNow.month, romeNow.day);
+    }
+    const previousRome = getRomeDateParts(new Date(date.getTime() - 24 * 60 * 60 * 1000));
+    return toDateKey(previousRome.year, previousRome.month, previousRome.day);
   };
 
   const formatDailyDateLabel = (dateKey) => {
@@ -1186,7 +1233,7 @@
     const m = Number.parseInt(dateKey.slice(4, 6), 10) - 1;
     const d = Number.parseInt(dateKey.slice(6, 8), 10);
     const dt = new Date(Date.UTC(y, m, d));
-    return `Seed ${dateKey} - ${dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} UTC`;
+    return `Seed ${dateKey} - ${dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "Europe/Rome" })} (reset 06:00 Italy)`;
   };
 
   const buildDailyInfo = () => {
@@ -1210,6 +1257,69 @@
 
   const writeDailyCache = (cache) => {
     window.localStorage.setItem(DAILY_RUN_CACHE_KEY, JSON.stringify(cache));
+  };
+
+  const readDailyRewardClaims = () => {
+    try {
+      const raw = window.localStorage.getItem(DAILY_REWARD_CLAIMS_KEY);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  };
+
+  const writeDailyRewardClaims = (claims) => {
+    window.localStorage.setItem(DAILY_REWARD_CLAIMS_KEY, JSON.stringify(claims));
+  };
+
+  const processDailyTopRewards = async () => {
+    if (!supabaseClient || !deviceId) {
+      return;
+    }
+    const currentCycleKey = getDailyDateKey();
+    const previousCycleKey = shiftDateKey(currentCycleKey, -1);
+    const claims = readDailyRewardClaims();
+    if (claims[previousCycleKey]) {
+      return;
+    }
+
+    const rewardsByRank = { 1: 60, 2: 50, 3: 20 };
+    const { data, error } = await supabaseClient
+      .from(DAILY_RUNS_TABLE)
+      .select("device_id,time_ms")
+      .eq("date_key", previousCycleKey)
+      .order("time_ms", { ascending: true })
+      .limit(3);
+
+    if (error) {
+      if (error.code === "42P01") {
+        return;
+      }
+      return;
+    }
+
+    const top = Array.isArray(data) ? data : [];
+    const rankIndex = top.findIndex((entry) => entry.device_id === deviceId);
+    const rank = rankIndex >= 0 ? rankIndex + 1 : 0;
+    const reward = rewardsByRank[rank] || 0;
+    if (reward > 0) {
+      setLocalState(walletOrbs + reward, highestLevel);
+      void upsertRemoteProfile().catch(() => {
+      });
+      if (dailyInfo && dailyInfo.dateKey === currentCycleKey) {
+        setDailyStatus(`Daily reward received: +${reward} orbs for rank #${rank} (previous cycle).`);
+      }
+    }
+    claims[previousCycleKey] = {
+      claimedAt: Date.now(),
+      reward,
+      rank
+    };
+    writeDailyRewardClaims(claims);
   };
 
   const buildChallengeInfo = () => {
@@ -1903,7 +2013,7 @@
       .select("date_key,device_id,player_alias,time_ms,replay,shape")
       .eq("date_key", dailyInfo.dateKey)
       .order("time_ms", { ascending: true })
-      .limit(10);
+      .limit(DAILY_LEADERBOARD_LIMIT);
     data = fullRes.data;
     error = fullRes.error;
     if (error && error.code === "42703") {
@@ -1912,7 +2022,7 @@
         .select("date_key,device_id,time_ms")
         .eq("date_key", dailyInfo.dateKey)
         .order("time_ms", { ascending: true })
-        .limit(10);
+        .limit(DAILY_LEADERBOARD_LIMIT);
       data = legacyRes.data;
       error = legacyRes.error;
     }
@@ -1969,7 +2079,7 @@
       const filtered = day.filter((entry) => entry.device_id !== deviceId);
       filtered.push(nextEntry);
       filtered.sort((a, b) => a.time_ms - b.time_ms);
-      cache[dateKey] = { entries: filtered.slice(0, 10) };
+      cache[dateKey] = { entries: filtered.slice(0, DAILY_LEADERBOARD_LIMIT) };
       writeDailyCache(cache);
     }
 
@@ -2179,6 +2289,8 @@
       void syncWithRemote().catch(() => {
       });
       startProfileHeartbeat();
+      void processDailyTopRewards().catch(() => {
+      });
     }
 
     ensureGameReady();
