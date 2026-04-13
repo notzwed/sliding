@@ -11,7 +11,10 @@
   };
   const BEST_TIME_KEY = "slidey_best_time_ms";
   const TOP_RECORD_KEY = "slidey_top_record";
-  const PLAYER_SHAPES = new Set(["square", "triangle", "circle", "diamond", "hex", "star", "capsule", "cross", "droplet"]);
+  const PLAYER_SHAPES = new Set([
+    "square", "triangle", "circle", "diamond", "hex", "star", "capsule", "cross", "droplet",
+    "heart", "moon", "clover", "crown", "bolt", "cog", "pinwheel", "hourglass", "kite", "orbit"
+  ]);
 
   class RNG {
     constructor(seed) {
@@ -3858,7 +3861,17 @@
         star: { moveStretch: 0.12, moveSqueeze: 0.06, collisionSquash: 0.22, collisionStretch: 0.16 },
         capsule: { moveStretch: 0.125, moveSqueeze: 0.066, collisionSquash: 0.26, collisionStretch: 0.18 },
         cross: { moveStretch: 0.082, moveSqueeze: 0.04, collisionSquash: 0.19, collisionStretch: 0.14 },
-        droplet: { moveStretch: 0.11, moveSqueeze: 0.05, collisionSquash: 0.24, collisionStretch: 0.17 }
+        droplet: { moveStretch: 0.11, moveSqueeze: 0.05, collisionSquash: 0.24, collisionStretch: 0.17 },
+        heart: { moveStretch: 0.118, moveSqueeze: 0.054, collisionSquash: 0.23, collisionStretch: 0.16 },
+        moon: { moveStretch: 0.106, moveSqueeze: 0.05, collisionSquash: 0.22, collisionStretch: 0.15 },
+        clover: { moveStretch: 0.1, moveSqueeze: 0.048, collisionSquash: 0.2, collisionStretch: 0.14 },
+        crown: { moveStretch: 0.09, moveSqueeze: 0.042, collisionSquash: 0.17, collisionStretch: 0.13 },
+        bolt: { moveStretch: 0.128, moveSqueeze: 0.062, collisionSquash: 0.24, collisionStretch: 0.18 },
+        cog: { moveStretch: 0.088, moveSqueeze: 0.042, collisionSquash: 0.18, collisionStretch: 0.12 },
+        pinwheel: { moveStretch: 0.114, moveSqueeze: 0.056, collisionSquash: 0.21, collisionStretch: 0.16 },
+        hourglass: { moveStretch: 0.102, moveSqueeze: 0.05, collisionSquash: 0.2, collisionStretch: 0.15 },
+        kite: { moveStretch: 0.108, moveSqueeze: 0.05, collisionSquash: 0.21, collisionStretch: 0.15 },
+        orbit: { moveStretch: 0.1, moveSqueeze: 0.047, collisionSquash: 0.19, collisionStretch: 0.14 }
       };
       return profiles[shape] || defaults;
     }
@@ -3880,6 +3893,26 @@
         this.drawCrossShape(ctx, centerX, centerY, width, height, this.levelTime * 0.5);
       } else if (shape === "droplet") {
         this.drawDropletShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "heart") {
+        this.drawHeartShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "moon") {
+        this.drawMoonShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "clover") {
+        this.drawCloverShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "crown") {
+        this.drawCrownShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "bolt") {
+        this.drawBoltShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "cog") {
+        this.drawCogShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "pinwheel") {
+        this.drawPinwheelShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "hourglass") {
+        this.drawHourglassShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "kite") {
+        this.drawKiteShape(ctx, centerX, centerY, width, height);
+      } else if (shape === "orbit") {
+        this.drawOrbitShape(ctx, centerX, centerY, width, height);
       } else {
         this.drawSquareShape(ctx, px, py, width, height);
       }
@@ -4016,6 +4049,155 @@
       );
       ctx.closePath();
       ctx.fill();
+    }
+
+    drawHeartShape(ctx, centerX, centerY, width, height) {
+      const w = width * 0.9;
+      const h = height * 0.92;
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY + h * 0.42);
+      ctx.bezierCurveTo(centerX - w * 0.58, centerY + h * 0.08, centerX - w * 0.62, centerY - h * 0.34, centerX, centerY - h * 0.04);
+      ctx.bezierCurveTo(centerX + w * 0.62, centerY - h * 0.34, centerX + w * 0.58, centerY + h * 0.08, centerX, centerY + h * 0.42);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawMoonShape(ctx, centerX, centerY, width, height) {
+      const r = Math.min(width, height) * 0.52;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
+      ctx.arc(centerX + r * 0.34, centerY - r * 0.08, r * 0.86, 0, Math.PI * 2, true);
+      ctx.fill();
+    }
+
+    drawCloverShape(ctx, centerX, centerY, width, height) {
+      const r = Math.min(width, height) * 0.24;
+      const stemW = r * 0.42;
+      const stemH = r * 1.65;
+      const offset = r * 0.9;
+      ctx.beginPath();
+      ctx.arc(centerX - offset * 0.7, centerY - offset * 0.45, r, 0, Math.PI * 2);
+      ctx.arc(centerX + offset * 0.7, centerY - offset * 0.45, r, 0, Math.PI * 2);
+      ctx.arc(centerX - offset * 0.7, centerY + offset * 0.45, r, 0, Math.PI * 2);
+      ctx.arc(centerX + offset * 0.7, centerY + offset * 0.45, r, 0, Math.PI * 2);
+      ctx.roundRect(centerX - stemW * 0.5, centerY + r * 0.45, stemW, stemH, stemW * 0.5);
+      ctx.fill();
+    }
+
+    drawCrownShape(ctx, centerX, centerY, width, height) {
+      const w = width * 0.94;
+      const h = height * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(centerX - w * 0.5, centerY + h * 0.35);
+      ctx.lineTo(centerX - w * 0.5, centerY - h * 0.08);
+      ctx.lineTo(centerX - w * 0.25, centerY + h * 0.03);
+      ctx.lineTo(centerX - w * 0.08, centerY - h * 0.33);
+      ctx.lineTo(centerX, centerY - h * 0.02);
+      ctx.lineTo(centerX + w * 0.08, centerY - h * 0.33);
+      ctx.lineTo(centerX + w * 0.25, centerY + h * 0.03);
+      ctx.lineTo(centerX + w * 0.5, centerY - h * 0.08);
+      ctx.lineTo(centerX + w * 0.5, centerY + h * 0.35);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawBoltShape(ctx, centerX, centerY, width, height) {
+      const w = width * 0.86;
+      const h = height * 0.92;
+      ctx.beginPath();
+      ctx.moveTo(centerX + w * 0.04, centerY - h * 0.5);
+      ctx.lineTo(centerX - w * 0.24, centerY - h * 0.06);
+      ctx.lineTo(centerX, centerY - h * 0.06);
+      ctx.lineTo(centerX - w * 0.22, centerY + h * 0.5);
+      ctx.lineTo(centerX + w * 0.27, centerY - h * 0.02);
+      ctx.lineTo(centerX, centerY - h * 0.02);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawCogShape(ctx, centerX, centerY, width, height) {
+      const radius = Math.min(width, height) * 0.5;
+      const inner = radius * 0.62;
+      const teeth = 10;
+      const spin = this.levelTime * 0.9;
+      ctx.beginPath();
+      for (let i = 0; i < teeth * 2; i += 1) {
+        const angle = spin + (i / (teeth * 2)) * Math.PI * 2;
+        const r = i % 2 === 0 ? radius : inner;
+        const x = centerX + Math.cos(angle) * r;
+        const y = centerY + Math.sin(angle) * r;
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawPinwheelShape(ctx, centerX, centerY, width, height) {
+      const r = Math.min(width, height) * 0.5;
+      const spin = this.levelTime * 2.3;
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(spin);
+      for (let i = 0; i < 4; i += 1) {
+        ctx.save();
+        ctx.rotate((i / 4) * Math.PI * 2);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(r * 0.68, -r * 0.16, r * 0.2, -r * 0.84);
+        ctx.lineTo(-r * 0.12, -r * 0.34);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    drawHourglassShape(ctx, centerX, centerY, width, height) {
+      const w = width * 0.8;
+      const h = height * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(centerX - w * 0.5, centerY - h * 0.5);
+      ctx.lineTo(centerX + w * 0.5, centerY - h * 0.5);
+      ctx.lineTo(centerX + w * 0.16, centerY);
+      ctx.lineTo(centerX + w * 0.5, centerY + h * 0.5);
+      ctx.lineTo(centerX - w * 0.5, centerY + h * 0.5);
+      ctx.lineTo(centerX - w * 0.16, centerY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawKiteShape(ctx, centerX, centerY, width, height) {
+      const w = width * 0.78;
+      const h = height * 0.94;
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY - h * 0.5);
+      ctx.lineTo(centerX + w * 0.5, centerY);
+      ctx.lineTo(centerX, centerY + h * 0.5);
+      ctx.lineTo(centerX - w * 0.5, centerY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    drawOrbitShape(ctx, centerX, centerY, width, height) {
+      const core = Math.min(width, height) * 0.22;
+      const rx = width * 0.48;
+      const ry = height * 0.33;
+      const spin = this.levelTime * 2.1;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, core, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.globalAlpha *= 0.82;
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.lineWidth = Math.max(1.2, Math.min(width, height) * 0.08);
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY, rx, ry, spin, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
     drawPlayerDeath(ctx, centerX, centerY, size, frameX, frameY, viewportWidth, viewportHeight, cellSize) {
