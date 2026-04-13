@@ -965,6 +965,39 @@ body.update-prompt-active .app-update-btn {
   gap: 8px;
 }
 
+.challenge-input-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(86vw, 360px);
+}
+
+.challenge-code-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(10, 10, 10, 0.86);
+  color: rgba(255, 255, 255, 0.95);
+  text-align: center;
+  text-transform: uppercase;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  outline: none;
+}
+
+.challenge-code-input::placeholder {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.challenge-code-input:focus-visible {
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.14);
+}
+
 .challenge-code-label {
   color: rgba(255, 255, 255, 0.62);
   letter-spacing: 0.12em;

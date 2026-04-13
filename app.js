@@ -33,6 +33,7 @@
   const closeChallengeBtn = document.getElementById("closeChallengeBtn");
   const copyChallengeBtn = document.getElementById("copyChallengeBtn");
   const challengeCodeValue = document.getElementById("challengeCodeValue");
+  const challengeCodeInput = document.getElementById("challengeCodeInput");
   const challengeStatusText = document.getElementById("challengeStatusText");
   const challengeResultScreen = document.getElementById("challengeResultScreen");
   const challengeFirstValue = document.getElementById("challengeFirstValue");
@@ -496,6 +497,10 @@
     hideShopMenu();
     challengeMenu.classList.remove("hidden");
     challengeMenu.setAttribute("aria-hidden", "false");
+    if (challengeCodeInput) {
+      challengeCodeInput.focus();
+      challengeCodeInput.select();
+    }
   };
 
   const setChallengeStatus = (text) => {
@@ -1029,6 +1034,10 @@
     if (challengeCodeValue) {
       challengeCodeValue.textContent = info.code;
     }
+    if (challengeCodeInput) {
+      challengeCodeInput.value = info.code;
+      challengeCodeInput.select();
+    }
     copyChallengeBtn?.classList.remove("hidden");
     setChallengeStatus("Code created. Share these 5 characters with your friend.");
     if (supabaseClient) {
@@ -1043,13 +1052,17 @@
   };
 
   const joinChallenge = async () => {
-    const raw = window.prompt("Enter the 5-character challenge code");
+    const raw = challengeCodeInput?.value || "";
     if (!raw) {
+      setChallengeStatus("Enter a 5-character challenge code.");
+      challengeCodeInput?.focus();
       return;
     }
     const parsed = parseChallengeCode(raw);
     if (!parsed) {
       setChallengeStatus("Invalid code. Use exactly 5 characters.");
+      challengeCodeInput?.focus();
+      challengeCodeInput?.select();
       return;
     }
 
@@ -1373,6 +1386,9 @@
     if (challengeCodeValue) {
       challengeCodeValue.textContent = "------";
     }
+    if (challengeCodeInput) {
+      challengeCodeInput.value = "";
+    }
     copyChallengeBtn?.classList.add("hidden");
     setChallengeStatus("Create or enter a 5-character challenge code.");
     hideChallengeResultScreen();
@@ -1409,7 +1425,22 @@
   closeChallengeBtn?.addEventListener("click", () => {
     stopChallengeSync();
     hideChallengeMenu();
+    if (challengeCodeInput) {
+      challengeCodeInput.value = "";
+    }
     showStartMenu();
+  });
+  challengeCodeInput?.addEventListener("input", () => {
+    challengeCodeInput.value = challengeCodeInput.value
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 5);
+  });
+  challengeCodeInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void joinChallenge();
+    }
   });
   challengeResultCloseBtn?.addEventListener("click", () => {
     closeChallengeAfterResult();
