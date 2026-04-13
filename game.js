@@ -77,6 +77,7 @@
       this.collapseFreezeRemaining = 0;
       this.orbMultiplierRemaining = 0;
       this.orbMultiplierValue = 1;
+      this.orbPickupWhisper = null;
       this.levelOrbCollected = 0;
       this.freezeWaveOrigin = null;
       this.lastTimestamp = 0;
@@ -407,6 +408,7 @@
       this.collapseFreezeRemaining = 0;
       this.orbMultiplierRemaining = 0;
       this.orbMultiplierValue = 1;
+      this.orbPickupWhisper = null;
       this.levelOrbCollected = 0;
       this.freezeWaveOrigin = null;
       this.tutorialFlow = null;
@@ -1811,6 +1813,12 @@
           this.orbMultiplierValue = 1;
         }
       }
+      if (this.orbPickupWhisper) {
+        this.orbPickupWhisper.time = Math.max(0, this.orbPickupWhisper.time - delta);
+        if (this.orbPickupWhisper.time <= 0) {
+          this.orbPickupWhisper = null;
+        }
+      }
     }
 
     getFreezeWaveState() {
@@ -2464,6 +2472,12 @@
 
       orb.collected = true;
       const orbType = orb.type || "normal";
+      this.orbPickupWhisper = {
+        x: orb.x,
+        y: orb.y,
+        time: 0.18,
+        duration: 0.18
+      };
       let gained = orbType === "normal" ? this.orbMultiplierValue : 0;
       if (orbType === "multiplier") {
         this.orbMultiplierRemaining = Math.max(this.orbMultiplierRemaining, 8);
@@ -2963,6 +2977,7 @@
       ctx.globalAlpha = sceneAlpha;
       this.drawMaze(ctx);
       this.drawOrbs(ctx);
+      this.drawOrbPickupWhisper(ctx);
       this.drawFreezeWave(ctx);
       this.drawExit(ctx);
       this.drawFocusMask(ctx);
@@ -3325,6 +3340,36 @@
         ctx.restore();
       }
 
+      ctx.restore();
+    }
+
+    drawOrbPickupWhisper(ctx) {
+      if (!this.orbPickupWhisper) {
+        return;
+      }
+      const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
+      const progress = 1 - this.clamp(this.orbPickupWhisper.time / this.orbPickupWhisper.duration, 0, 1);
+      const alpha = (1 - progress) * 0.075;
+      if (alpha <= 0.003) {
+        return;
+      }
+
+      const center = this.toScreen(this.orbPickupWhisper.x, this.orbPickupWhisper.y);
+      const cx = center.x + cellSize / 2;
+      const cy = center.y + cellSize / 2;
+      const innerRadius = cellSize * (0.03 + progress * 0.04);
+      const outerRadius = cellSize * (0.14 + progress * 0.16);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
+      ctx.clip();
+      const ring = ctx.createRadialGradient(cx, cy, innerRadius, cx, cy, outerRadius);
+      ring.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      ring.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = ring;
+      const size = outerRadius * 2;
+      ctx.fillRect(cx - outerRadius, cy - outerRadius, size, size);
       ctx.restore();
     }
 
