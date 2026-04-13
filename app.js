@@ -58,11 +58,9 @@
     { shape: "droplet", cost: 430 },
     { shape: "heart", cost: 520 },
     { shape: "moon", cost: 630 },
-    { shape: "clover", cost: 760 },
     { shape: "crown", cost: 900 },
     { shape: "bolt", cost: 1060 },
     { shape: "cog", cost: 1230 },
-    { shape: "pinwheel", cost: 1410 },
     { shape: "hourglass", cost: 1600 },
     { shape: "kite", cost: 1800 },
     { shape: "orbit", cost: 2050 }

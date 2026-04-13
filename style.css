@@ -872,23 +872,6 @@ body.update-prompt-active .app-update-btn {
   animation: previewMoon 2.4s ease-in-out infinite reverse;
 }
 
-.shape-preview-clover::before {
-  inset: 18%;
-  clip-path: polygon(50% 14%, 67% 26%, 66% 45%, 50% 54%, 34% 45%, 33% 26%);
-  animation: previewCloverLeaf 1.9s ease-in-out infinite;
-}
-
-.shape-preview-clover::after {
-  content: "";
-  position: absolute;
-  inset: 18%;
-  background: #fff;
-  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.34));
-  clip-path: polygon(14% 50%, 26% 33%, 45% 34%, 54% 50%, 45% 66%, 26% 67%);
-  transform: rotate(90deg);
-  animation: previewCloverLeafB 1.9s ease-in-out infinite;
-}
-
 .shape-preview-crown::before {
   inset: 18% 16%;
   clip-path: polygon(0% 100%, 0% 52%, 20% 64%, 34% 28%, 50% 62%, 66% 28%, 80% 64%, 100% 52%, 100% 100%);
@@ -905,23 +888,6 @@ body.update-prompt-active .app-update-btn {
   inset: 16%;
   clip-path: polygon(50% 0%, 62% 9%, 76% 5%, 82% 18%, 95% 24%, 91% 38%, 100% 50%, 91% 62%, 95% 76%, 82% 82%, 76% 95%, 62% 91%, 50% 100%, 38% 91%, 24% 95%, 18% 82%, 5% 76%, 9% 62%, 0% 50%, 9% 38%, 5% 24%, 18% 18%, 24% 5%, 38% 9%);
   animation: previewCog 2.45s linear infinite;
-}
-
-.shape-preview-pinwheel::before {
-  inset: 18%;
-  clip-path: polygon(50% 50%, 18% 12%, 56% 18%);
-  transform-origin: 50% 50%;
-  animation: previewPinwheel 2.2s linear infinite;
-}
-
-.shape-preview-pinwheel::after {
-  content: "";
-  position: absolute;
-  inset: 18%;
-  background: #fff;
-  clip-path: polygon(50% 50%, 82% 88%, 44% 82%);
-  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.34));
-  animation: previewPinwheel 2.2s linear infinite reverse;
 }
 
 .shape-preview-hourglass::before {
@@ -1352,16 +1318,6 @@ body.update-prompt-active .app-update-btn {
   50% { transform: rotate(10deg) translateX(2px); }
 }
 
-@keyframes previewCloverLeaf {
-  0%, 100% { transform: rotate(0deg) scale(1); }
-  50% { transform: rotate(-14deg) scale(1.04); }
-}
-
-@keyframes previewCloverLeafB {
-  0%, 100% { transform: rotate(90deg) scale(1); }
-  50% { transform: rotate(106deg) scale(0.96); }
-}
-
 @keyframes previewCrown {
   0%, 100% { transform: translateY(0) scale(1); }
   40% { transform: translateY(-2px) scale(1.04); }
@@ -1375,11 +1331,6 @@ body.update-prompt-active .app-update-btn {
 }
 
 @keyframes previewCog {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-@keyframes previewPinwheel {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }

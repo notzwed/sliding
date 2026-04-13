@@ -13,7 +13,7 @@
   const TOP_RECORD_KEY = "slidey_top_record";
   const PLAYER_SHAPES = new Set([
     "square", "triangle", "circle", "diamond", "hex", "star", "capsule", "cross", "droplet",
-    "heart", "moon", "clover", "crown", "bolt", "cog", "pinwheel", "hourglass", "kite", "orbit"
+    "heart", "moon", "crown", "bolt", "cog", "hourglass", "kite", "orbit"
   ]);
 
   class RNG {
@@ -3864,11 +3864,9 @@
         droplet: { moveStretch: 0.11, moveSqueeze: 0.05, collisionSquash: 0.24, collisionStretch: 0.17 },
         heart: { moveStretch: 0.118, moveSqueeze: 0.054, collisionSquash: 0.23, collisionStretch: 0.16 },
         moon: { moveStretch: 0.106, moveSqueeze: 0.05, collisionSquash: 0.22, collisionStretch: 0.15 },
-        clover: { moveStretch: 0.1, moveSqueeze: 0.048, collisionSquash: 0.2, collisionStretch: 0.14 },
         crown: { moveStretch: 0.09, moveSqueeze: 0.042, collisionSquash: 0.17, collisionStretch: 0.13 },
         bolt: { moveStretch: 0.128, moveSqueeze: 0.062, collisionSquash: 0.24, collisionStretch: 0.18 },
         cog: { moveStretch: 0.088, moveSqueeze: 0.042, collisionSquash: 0.18, collisionStretch: 0.12 },
-        pinwheel: { moveStretch: 0.114, moveSqueeze: 0.056, collisionSquash: 0.21, collisionStretch: 0.16 },
         hourglass: { moveStretch: 0.102, moveSqueeze: 0.05, collisionSquash: 0.2, collisionStretch: 0.15 },
         kite: { moveStretch: 0.108, moveSqueeze: 0.05, collisionSquash: 0.21, collisionStretch: 0.15 },
         orbit: { moveStretch: 0.1, moveSqueeze: 0.047, collisionSquash: 0.19, collisionStretch: 0.14 }
@@ -3897,16 +3895,12 @@
         this.drawHeartShape(ctx, centerX, centerY, width, height);
       } else if (shape === "moon") {
         this.drawMoonShape(ctx, centerX, centerY, width, height);
-      } else if (shape === "clover") {
-        this.drawCloverShape(ctx, centerX, centerY, width, height);
       } else if (shape === "crown") {
         this.drawCrownShape(ctx, centerX, centerY, width, height);
       } else if (shape === "bolt") {
         this.drawBoltShape(ctx, centerX, centerY, width, height);
       } else if (shape === "cog") {
         this.drawCogShape(ctx, centerX, centerY, width, height);
-      } else if (shape === "pinwheel") {
-        this.drawPinwheelShape(ctx, centerX, centerY, width, height);
       } else if (shape === "hourglass") {
         this.drawHourglassShape(ctx, centerX, centerY, width, height);
       } else if (shape === "kite") {
@@ -4070,20 +4064,6 @@
       ctx.fill();
     }
 
-    drawCloverShape(ctx, centerX, centerY, width, height) {
-      const r = Math.min(width, height) * 0.24;
-      const stemW = r * 0.42;
-      const stemH = r * 1.65;
-      const offset = r * 0.9;
-      ctx.beginPath();
-      ctx.arc(centerX - offset * 0.7, centerY - offset * 0.45, r, 0, Math.PI * 2);
-      ctx.arc(centerX + offset * 0.7, centerY - offset * 0.45, r, 0, Math.PI * 2);
-      ctx.arc(centerX - offset * 0.7, centerY + offset * 0.45, r, 0, Math.PI * 2);
-      ctx.arc(centerX + offset * 0.7, centerY + offset * 0.45, r, 0, Math.PI * 2);
-      ctx.roundRect(centerX - stemW * 0.5, centerY + r * 0.45, stemW, stemH, stemW * 0.5);
-      ctx.fill();
-    }
-
     drawCrownShape(ctx, centerX, centerY, width, height) {
       const w = width * 0.94;
       const h = height * 0.9;
@@ -4134,26 +4114,6 @@
       }
       ctx.closePath();
       ctx.fill();
-    }
-
-    drawPinwheelShape(ctx, centerX, centerY, width, height) {
-      const r = Math.min(width, height) * 0.5;
-      const spin = this.levelTime * 2.3;
-      ctx.save();
-      ctx.translate(centerX, centerY);
-      ctx.rotate(spin);
-      for (let i = 0; i < 4; i += 1) {
-        ctx.save();
-        ctx.rotate((i / 4) * Math.PI * 2);
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.quadraticCurveTo(r * 0.68, -r * 0.16, r * 0.2, -r * 0.84);
-        ctx.lineTo(-r * 0.12, -r * 0.34);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
-      ctx.restore();
     }
 
     drawHourglassShape(ctx, centerX, centerY, width, height) {
