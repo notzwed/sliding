@@ -1099,9 +1099,10 @@
     const unlocked = isDailyUnlocked();
     const remaining = unlocked ? getDailyAttemptsRemaining(dateKey) : 0;
     if (dailyRunBtn) {
-      dailyRunBtn.disabled = !unlocked;
-      dailyRunBtn.textContent = unlocked ? "Daily" : `Daily Lv${DAILY_UNLOCK_LEVEL}`;
-      dailyRunBtn.setAttribute("aria-disabled", String(!unlocked));
+      // Keep Daily menu accessible for everyone so leaderboard is always visible.
+      dailyRunBtn.disabled = false;
+      dailyRunBtn.textContent = "Daily";
+      dailyRunBtn.setAttribute("aria-disabled", "false");
     }
     if (dailyStartBtn) {
       const canStart = unlocked && remaining > 0;
@@ -1121,7 +1122,7 @@
     const key = dailyInfo?.dateKey || getDailyDateKey();
     syncDailyAccessUi(key);
     if (!isDailyUnlocked()) {
-      setDailyStatus(`Unlock Daily at level ${DAILY_UNLOCK_LEVEL}. Current: ${highestLevel}.`);
+      setDailyStatus(`Leaderboard available. Daily run unlocks at level ${DAILY_UNLOCK_LEVEL} (current: ${highestLevel}).`);
       return;
     }
     const remaining = getDailyAttemptsRemaining(key);
@@ -1895,12 +1896,26 @@
       return;
     }
 
-    const { data, error } = await supabaseClient
+    let data = null;
+    let error = null;
+    const fullRes = await supabaseClient
       .from(DAILY_RUNS_TABLE)
       .select("date_key,device_id,player_alias,time_ms,replay,shape")
       .eq("date_key", dailyInfo.dateKey)
       .order("time_ms", { ascending: true })
       .limit(10);
+    data = fullRes.data;
+    error = fullRes.error;
+    if (error && error.code === "42703") {
+      const legacyRes = await supabaseClient
+        .from(DAILY_RUNS_TABLE)
+        .select("date_key,device_id,time_ms")
+        .eq("date_key", dailyInfo.dateKey)
+        .order("time_ms", { ascending: true })
+        .limit(10);
+      data = legacyRes.data;
+      error = legacyRes.error;
+    }
 
     if (error) {
       if (error.code === "42P01") {
@@ -1913,7 +1928,14 @@
       return;
     }
 
-    dailyLeaderboard = Array.isArray(data) ? data : [];
+    dailyLeaderboard = Array.isArray(data) ? data.map((entry) => ({
+      date_key: entry.date_key,
+      device_id: entry.device_id,
+      player_alias: entry.player_alias || (entry.device_id === deviceId ? getPlayerAlias() : `P-${String(entry.device_id || "").slice(-4).toUpperCase()}`),
+      time_ms: readNumber(entry.time_ms, 0),
+      replay: Array.isArray(entry.replay) ? entry.replay : [],
+      shape: entry.shape || "square"
+    })) : [];
     cache[dailyInfo.dateKey] = { entries: dailyLeaderboard };
     writeDailyCache(cache);
     renderDailyLeaderboard();
@@ -1987,7 +2009,19 @@
       shape: shape || selectedShape
     };
 
-    const { error: upsertError } = await supabaseClient.from(DAILY_RUNS_TABLE).upsert(payload, { onConflict: "date_key,device_id" });
+    let upsertError = null;
+    const fullUpsert = await supabaseClient.from(DAILY_RUNS_TABLE).upsert(payload, { onConflict: "date_key,device_id" });
+    upsertError = fullUpsert.error;
+    if (upsertError && upsertError.code === "42703") {
+      const legacyPayload = {
+        date_key: dateKey,
+        device_id: deviceId,
+        level: Math.max(1, readNumber(level, DAILY_LEVEL)),
+        time_ms: Math.floor(timeMs)
+      };
+      const legacyUpsert = await supabaseClient.from(DAILY_RUNS_TABLE).upsert(legacyPayload, { onConflict: "date_key,device_id" });
+      upsertError = legacyUpsert.error;
+    }
     if (upsertError && upsertError.code !== "42P01") {
       await refreshDailyLeaderboard();
       return;
