@@ -965,11 +965,31 @@ body.update-prompt-active .app-update-btn {
   gap: 8px;
 }
 
-.challenge-input-wrap {
+.challenge-join-panel {
   display: grid;
   justify-items: center;
-  gap: 8px;
+  gap: 10px;
   width: min(86vw, 360px);
+  padding: 14px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
+    rgba(8, 8, 8, 0.72);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.challenge-join-panel.hidden {
+  display: none;
+}
+
+.challenge-join-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
 }
 
 .challenge-code-input {

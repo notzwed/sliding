@@ -34,6 +34,9 @@
   const copyChallengeBtn = document.getElementById("copyChallengeBtn");
   const challengeCodeValue = document.getElementById("challengeCodeValue");
   const challengeCodeInput = document.getElementById("challengeCodeInput");
+  const challengeJoinPanel = document.getElementById("challengeJoinPanel");
+  const challengeJoinConfirmBtn = document.getElementById("challengeJoinConfirmBtn");
+  const challengeJoinCancelBtn = document.getElementById("challengeJoinCancelBtn");
   const challengeStatusText = document.getElementById("challengeStatusText");
   const challengeResultScreen = document.getElementById("challengeResultScreen");
   const challengeFirstValue = document.getElementById("challengeFirstValue");
@@ -486,8 +489,27 @@
     if (!challengeMenu) {
       return;
     }
+    challengeJoinPanel?.classList.add("hidden");
+    challengeJoinPanel?.setAttribute("aria-hidden", "true");
     challengeMenu.classList.add("hidden");
     challengeMenu.setAttribute("aria-hidden", "true");
+  };
+
+  const openChallengeJoinPanel = () => {
+    challengeJoinPanel?.classList.remove("hidden");
+    challengeJoinPanel?.setAttribute("aria-hidden", "false");
+    if (challengeCodeInput) {
+      challengeCodeInput.focus();
+      challengeCodeInput.select();
+    }
+  };
+
+  const closeChallengeJoinPanel = ({ clear = false } = {}) => {
+    challengeJoinPanel?.classList.add("hidden");
+    challengeJoinPanel?.setAttribute("aria-hidden", "true");
+    if (clear && challengeCodeInput) {
+      challengeCodeInput.value = "";
+    }
   };
 
   const showChallengeMenu = () => {
@@ -497,10 +519,7 @@
     hideShopMenu();
     challengeMenu.classList.remove("hidden");
     challengeMenu.setAttribute("aria-hidden", "false");
-    if (challengeCodeInput) {
-      challengeCodeInput.focus();
-      challengeCodeInput.select();
-    }
+    closeChallengeJoinPanel();
   };
 
   const setChallengeStatus = (text) => {
@@ -1030,6 +1049,7 @@
   };
 
   const createChallenge = () => {
+    closeChallengeJoinPanel({ clear: true });
     const info = buildChallengeInfo();
     if (challengeCodeValue) {
       challengeCodeValue.textContent = info.code;
@@ -1096,6 +1116,7 @@
     }
     copyChallengeBtn?.classList.remove("hidden");
     setChallengeStatus("Challenge accepted. Get ready for the start.");
+    closeChallengeJoinPanel({ clear: true });
     launchChallenge(info);
   };
 
@@ -1389,6 +1410,7 @@
     if (challengeCodeInput) {
       challengeCodeInput.value = "";
     }
+    closeChallengeJoinPanel();
     copyChallengeBtn?.classList.add("hidden");
     setChallengeStatus("Create or enter a 5-character challenge code.");
     hideChallengeResultScreen();
@@ -1418,16 +1440,20 @@
   storeBtn?.addEventListener("click", showShopMenu);
   closeShopBtn?.addEventListener("click", hideShopMenu);
   createChallengeBtn?.addEventListener("click", createChallenge);
-  joinChallengeBtn?.addEventListener("click", joinChallenge);
+  joinChallengeBtn?.addEventListener("click", openChallengeJoinPanel);
+  challengeJoinConfirmBtn?.addEventListener("click", () => {
+    void joinChallenge();
+  });
+  challengeJoinCancelBtn?.addEventListener("click", () => {
+    closeChallengeJoinPanel({ clear: true });
+  });
   copyChallengeBtn?.addEventListener("click", () => {
     void copyChallengeCode();
   });
   closeChallengeBtn?.addEventListener("click", () => {
     stopChallengeSync();
     hideChallengeMenu();
-    if (challengeCodeInput) {
-      challengeCodeInput.value = "";
-    }
+    closeChallengeJoinPanel({ clear: true });
     showStartMenu();
   });
   challengeCodeInput?.addEventListener("input", () => {
@@ -1437,6 +1463,11 @@
       .slice(0, 5);
   });
   challengeCodeInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeChallengeJoinPanel({ clear: true });
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault();
       void joinChallenge();

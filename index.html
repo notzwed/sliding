@@ -165,7 +165,7 @@
       <button id="createChallengeBtn" class="challenge-action challenge-action-primary" type="button">Create Code</button>
       <button id="joinChallengeBtn" class="challenge-action" type="button">Join Code</button>
     </div>
-    <div class="challenge-input-wrap">
+    <div id="challengeJoinPanel" class="challenge-join-panel hidden" aria-hidden="true">
       <label for="challengeCodeInput" class="challenge-code-label">Enter Code</label>
       <input
         id="challengeCodeInput"
@@ -179,6 +179,10 @@
         placeholder="ABCDE"
         aria-label="Challenge code"
       >
+      <div class="challenge-join-actions">
+        <button id="challengeJoinConfirmBtn" class="challenge-copy" type="button">Join</button>
+        <button id="challengeJoinCancelBtn" class="challenge-close" type="button">Cancel</button>
+      </div>
     </div>
     <div class="challenge-code-wrap">
       <span class="challenge-code-label">Code</span>
