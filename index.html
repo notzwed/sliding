@@ -87,6 +87,7 @@
     </h1>
     <div class="menu-actions">
       <button id="startRunBtn" class="menu-button menu-button-primary" type="button">Start</button>
+      <button id="dailyRunBtn" class="menu-button" type="button">Daily</button>
       <button id="challengeBtn" class="menu-button" type="button">Challenge</button>
       <button id="storeBtn" class="menu-button" type="button">Shop</button>
     </div>
@@ -247,6 +248,33 @@
     <p class="challenge-result-line">Last: <strong id="challengeLastValue">-</strong></p>
     <p id="challengeResultDetail" class="challenge-result-detail"></p>
     <button id="challengeResultCloseBtn" class="challenge-result-close" type="button">Back To Main</button>
+  </div>
+
+  <div id="dailyMenu" class="daily-menu hidden" aria-hidden="true">
+    <h2 class="daily-title">DAILY RUN</h2>
+    <p id="dailyDateLabel" class="daily-date">--</p>
+    <p id="dailyStatusText" class="daily-status">Loading daily leaderboard...</p>
+    <ol id="dailyLeaderboardList" class="daily-leaderboard"></ol>
+    <div class="daily-actions">
+      <button id="dailyStartBtn" class="challenge-action challenge-action-primary" type="button">Start Daily</button>
+      <button id="dailyCloseBtn" class="challenge-close" type="button">Back</button>
+    </div>
+  </div>
+
+  <button id="globalLeaderboardBtn" class="global-leaderboard-btn" type="button" aria-label="Open global leaderboard">
+    <span class="global-leaderboard-icon" aria-hidden="true"></span>
+  </button>
+
+  <div id="globalLeaderboardMenu" class="global-leaderboard-menu hidden" aria-hidden="true">
+    <h2 class="global-leaderboard-title">GLOBAL LEADERBOARD</h2>
+    <div class="global-leaderboard-tabs">
+      <button id="globalLbTabOrbs" class="global-lb-tab is-active" type="button" data-tab="orbs">Top Orbs</button>
+      <button id="globalLbTabTime" class="global-lb-tab" type="button" data-tab="time">Top Time</button>
+      <button id="globalLbTabLevels" class="global-lb-tab" type="button" data-tab="levels">Top Levels</button>
+    </div>
+    <p id="globalLeaderboardStatus" class="global-leaderboard-status">Loading...</p>
+    <ol id="globalLeaderboardList" class="global-leaderboard-list"></ol>
+    <button id="globalLeaderboardCloseBtn" class="challenge-close" type="button">Back</button>
   </div>
 
   <div id="installGate" class="install-gate hidden" aria-hidden="true">

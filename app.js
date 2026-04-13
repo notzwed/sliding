@@ -12,8 +12,16 @@
   const REMOTE_TABLE = "player_profiles";
   const CHALLENGE_TABLE = "challenge_presence";
   const LEVEL_RECORDS_TABLE = "level_records";
+  const DAILY_RUNS_TABLE = "daily_runs";
   const REMOTE_COMMIT_API = "https://api.github.com/repos/notzwed/sliding/commits/main";
   const LAST_REMOTE_COMMIT_KEY = "slidey_last_remote_commit";
+  const DAILY_RUN_CACHE_KEY = "slidey_daily_cache_v1";
+  const DAILY_ATTEMPTS_KEY = "slidey_daily_attempts_v1";
+  const DAILY_LEVEL = 10;
+  const DAILY_UNLOCK_LEVEL = 10;
+  const DAILY_MAX_ATTEMPTS = 3;
+  const GLOBAL_LEADERBOARD_LIMIT = 50;
+  const ACTIVE_LEADERBOARD_WINDOW_MS = 2 * 60 * 60 * 1000;
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
@@ -22,6 +30,7 @@
   const bestTimeValue = document.getElementById("bestTimeValue");
   const menuOrbsValue = document.getElementById("menuOrbsValue");
   const startRunBtn = document.getElementById("startRunBtn");
+  const dailyRunBtn = document.getElementById("dailyRunBtn");
   const challengeBtn = document.getElementById("challengeBtn");
   const storeBtn = document.getElementById("storeBtn");
   const tutorialBtn = document.getElementById("tutorialBtn");
@@ -43,6 +52,20 @@
   const challengeLastValue = document.getElementById("challengeLastValue");
   const challengeResultDetail = document.getElementById("challengeResultDetail");
   const challengeResultCloseBtn = document.getElementById("challengeResultCloseBtn");
+  const dailyMenu = document.getElementById("dailyMenu");
+  const dailyDateLabel = document.getElementById("dailyDateLabel");
+  const dailyStatusText = document.getElementById("dailyStatusText");
+  const dailyLeaderboardList = document.getElementById("dailyLeaderboardList");
+  const dailyStartBtn = document.getElementById("dailyStartBtn");
+  const dailyCloseBtn = document.getElementById("dailyCloseBtn");
+  const globalLeaderboardBtn = document.getElementById("globalLeaderboardBtn");
+  const globalLeaderboardMenu = document.getElementById("globalLeaderboardMenu");
+  const globalLbTabOrbs = document.getElementById("globalLbTabOrbs");
+  const globalLbTabTime = document.getElementById("globalLbTabTime");
+  const globalLbTabLevels = document.getElementById("globalLbTabLevels");
+  const globalLeaderboardStatus = document.getElementById("globalLeaderboardStatus");
+  const globalLeaderboardList = document.getElementById("globalLeaderboardList");
+  const globalLeaderboardCloseBtn = document.getElementById("globalLeaderboardCloseBtn");
   const shopOrbsValue = document.getElementById("shopOrbsValue");
   const shapeButtons = Array.from(document.querySelectorAll(".shop-button[data-shape]"));
 
@@ -86,6 +109,21 @@
   let challengeLocalResult = null;
   let challengeOpponentResult = null;
   let challengeResultShown = false;
+  let dailyInfo = null;
+  let dailyLeaderboard = [];
+  let dailyTopReplay = null;
+  let globalLeaderboardState = {
+    orbs: [],
+    time: [],
+    levels: []
+  };
+  let globalLeaderboardTab = "orbs";
+  let globalLeaderboardFetchedAt = 0;
+  let globalLeaderboardLoading = false;
+  let globalLeaderboardBaseStatus = "";
+  let globalLeaderboardRanks = { orbs: null, time: null, levels: null };
+  let remoteSupportsBestTime = true;
+  let profileHeartbeatTimer = null;
   let swRegistration = null;
   let appUpdateReady = false;
   let latestRemoteCommitSha = "";
@@ -365,6 +403,9 @@
     return `P-${tail}`;
   };
 
+  const getBestTimeMsLocal = () =>
+    Math.max(0, readNumber(window.localStorage.getItem(BEST_TIME_KEY), 0));
+
   const applyLevelTopToGame = (level) => {
     const key = String(Math.max(1, readNumber(level, 1)));
     const record = levelTopCache[key];
@@ -475,6 +516,7 @@
     }
     startMenu.classList.add("hidden");
     startMenu.setAttribute("aria-hidden", "true");
+    globalLeaderboardBtn?.classList.add("hidden");
   };
 
   const showStartMenu = () => {
@@ -483,6 +525,7 @@
     }
     startMenu.classList.remove("hidden");
     startMenu.setAttribute("aria-hidden", "false");
+    globalLeaderboardBtn?.classList.remove("hidden");
   };
 
   const hideShopMenu = () => {
@@ -501,6 +544,14 @@
     challengeJoinPanel?.setAttribute("aria-hidden", "true");
     challengeMenu.classList.add("hidden");
     challengeMenu.setAttribute("aria-hidden", "true");
+  };
+
+  const hideGlobalLeaderboardMenu = () => {
+    if (!globalLeaderboardMenu) {
+      return;
+    }
+    globalLeaderboardMenu.classList.add("hidden");
+    globalLeaderboardMenu.setAttribute("aria-hidden", "true");
   };
 
   const openChallengeJoinPanel = () => {
@@ -525,6 +576,8 @@
       return;
     }
     hideShopMenu();
+    hideDailyMenu();
+    hideGlobalLeaderboardMenu();
     challengeMenu.classList.remove("hidden");
     challengeMenu.setAttribute("aria-hidden", "false");
     closeChallengeJoinPanel();
@@ -570,10 +623,316 @@
       return;
     }
     hideChallengeMenu();
+    hideDailyMenu();
+    hideGlobalLeaderboardMenu();
     updateMenuOrbsDisplay();
     updateShapeButtons();
     shopMenu.classList.remove("hidden");
     shopMenu.setAttribute("aria-hidden", "false");
+  };
+
+  const hideDailyMenu = () => {
+    if (!dailyMenu) {
+      return;
+    }
+    dailyMenu.classList.add("hidden");
+    dailyMenu.setAttribute("aria-hidden", "true");
+  };
+
+  const renderDailyLeaderboard = () => {
+    if (!dailyLeaderboardList) {
+      return;
+    }
+    dailyLeaderboardList.textContent = "";
+    if (!dailyLeaderboard.length) {
+      const empty = document.createElement("li");
+      empty.textContent = "No runs yet for today.";
+      dailyLeaderboardList.appendChild(empty);
+      return;
+    }
+    dailyLeaderboard.forEach((entry, index) => {
+      const li = document.createElement("li");
+      const mark = entry.device_id === deviceId ? " (You)" : "";
+      li.textContent = `#${index + 1} ${entry.player_alias || "Player"}${mark} - ${formatTime(entry.time_ms)}`;
+      dailyLeaderboardList.appendChild(li);
+    });
+  };
+
+  const setDailyStatus = (text) => {
+    if (dailyStatusText) {
+      dailyStatusText.textContent = text;
+    }
+  };
+
+  const setGlobalLeaderboardStatus = (text) => {
+    globalLeaderboardBaseStatus = text || "";
+    if (globalLeaderboardStatus) {
+      const rank = readNumber(globalLeaderboardRanks[globalLeaderboardTab], 0);
+      let suffix = "";
+      if (rank > GLOBAL_LEADERBOARD_LIMIT) {
+        suffix = ` Your rank: #${rank} (outside top ${GLOBAL_LEADERBOARD_LIMIT}).`;
+      } else if (rank > 0) {
+        suffix = ` Your rank: #${rank}.`;
+      }
+      globalLeaderboardStatus.textContent = `${globalLeaderboardBaseStatus}${suffix}`.trim();
+    }
+  };
+
+  const getActiveCutoffIso = () => new Date(Date.now() - ACTIVE_LEADERBOARD_WINDOW_MS).toISOString();
+
+  const formatGlobalPlayerName = (entryDeviceId) => {
+    if (typeof entryDeviceId === "string" && entryDeviceId === deviceId) {
+      return "You";
+    }
+    const tail = typeof entryDeviceId === "string" ? entryDeviceId.slice(-4).toUpperCase() : "----";
+    return `P-${tail}`;
+  };
+
+  const getGlobalLeaderboardEntriesForTab = () => {
+    if (globalLeaderboardTab === "time") {
+      return Array.isArray(globalLeaderboardState.time) ? globalLeaderboardState.time : [];
+    }
+    if (globalLeaderboardTab === "levels") {
+      return Array.isArray(globalLeaderboardState.levels) ? globalLeaderboardState.levels : [];
+    }
+    return Array.isArray(globalLeaderboardState.orbs) ? globalLeaderboardState.orbs : [];
+  };
+
+  const renderGlobalLeaderboard = () => {
+    if (!globalLeaderboardList) {
+      return;
+    }
+    const tabs = [globalLbTabOrbs, globalLbTabTime, globalLbTabLevels];
+    tabs.forEach((tab) => {
+      if (!tab) {
+        return;
+      }
+      tab.classList.toggle("is-active", tab.dataset.tab === globalLeaderboardTab);
+    });
+    globalLeaderboardList.textContent = "";
+    const entries = getGlobalLeaderboardEntriesForTab().slice(0, GLOBAL_LEADERBOARD_LIMIT);
+    if (!entries.length) {
+      const empty = document.createElement("li");
+      empty.textContent = "No entries available yet.";
+      globalLeaderboardList.appendChild(empty);
+      return;
+    }
+    entries.forEach((entry, index) => {
+      const li = document.createElement("li");
+      const name = formatGlobalPlayerName(entry.device_id);
+      if (globalLeaderboardTab === "time") {
+        li.textContent = `#${index + 1} ${name} - ${formatTime(entry.best_time_ms)}`;
+      } else if (globalLeaderboardTab === "levels") {
+        li.textContent = `#${index + 1} ${name} - Lv ${Math.max(1, readNumber(entry.highest_level, 1))} | ${Math.max(0, readNumber(entry.wallet_orbs, 0))} orbs`;
+      } else {
+        li.textContent = `#${index + 1} ${name} - ${Math.max(0, readNumber(entry.wallet_orbs, 0))} orbs`;
+      }
+      globalLeaderboardList.appendChild(li);
+    });
+  };
+
+  const setGlobalLeaderboardTab = (tab) => {
+    const next = tab === "time" || tab === "levels" ? tab : "orbs";
+    globalLeaderboardTab = next;
+    renderGlobalLeaderboard();
+    setGlobalLeaderboardStatus(globalLeaderboardBaseStatus);
+  };
+
+  const refreshGlobalLeaderboard = async ({ force = false } = {}) => {
+    if (!globalLeaderboardMenu) {
+      return;
+    }
+    const now = Date.now();
+    if (!force && now - globalLeaderboardFetchedAt < 20000) {
+      renderGlobalLeaderboard();
+      return;
+    }
+    if (globalLeaderboardLoading) {
+      return;
+    }
+    globalLeaderboardLoading = true;
+    globalLeaderboardBtn?.setAttribute("aria-busy", "true");
+    setGlobalLeaderboardStatus("Loading global leaderboard...");
+
+    const localSnapshot = {
+      device_id: deviceId,
+      wallet_orbs: walletOrbs,
+      highest_level: highestLevel,
+      best_time_ms: getBestTimeMsLocal()
+    };
+    const cutoffIso = getActiveCutoffIso();
+
+    try {
+      if (!supabaseClient) {
+        globalLeaderboardState = {
+          orbs: [localSnapshot],
+          levels: [localSnapshot],
+          time: localSnapshot.best_time_ms > 0 ? [localSnapshot] : []
+        };
+        globalLeaderboardRanks = {
+          orbs: 1,
+          levels: 1,
+          time: localSnapshot.best_time_ms > 0 ? 1 : null
+        };
+        globalLeaderboardFetchedAt = now;
+        setGlobalLeaderboardStatus("Offline mode: local profile only.");
+        renderGlobalLeaderboard();
+        return;
+      }
+
+      const orbsQuery = supabaseClient
+        .from(REMOTE_TABLE)
+        .select("device_id,wallet_orbs")
+        .gte("updated_at", cutoffIso)
+        .order("wallet_orbs", { ascending: false })
+        .limit(GLOBAL_LEADERBOARD_LIMIT);
+      const levelsQuery = supabaseClient
+        .from(REMOTE_TABLE)
+        .select("device_id,highest_level,wallet_orbs")
+        .gte("updated_at", cutoffIso)
+        .order("highest_level", { ascending: false })
+        .order("wallet_orbs", { ascending: false })
+        .limit(GLOBAL_LEADERBOARD_LIMIT);
+
+      const orbsRankQuery = supabaseClient
+        .from(REMOTE_TABLE)
+        .select("device_id", { count: "exact", head: true })
+        .gte("updated_at", cutoffIso)
+        .gt("wallet_orbs", Math.max(0, walletOrbs));
+      const levelsHigherQuery = supabaseClient
+        .from(REMOTE_TABLE)
+        .select("device_id", { count: "exact", head: true })
+        .gte("updated_at", cutoffIso)
+        .gt("highest_level", Math.max(1, highestLevel));
+      const levelsSameHigherOrbsQuery = supabaseClient
+        .from(REMOTE_TABLE)
+        .select("device_id", { count: "exact", head: true })
+        .gte("updated_at", cutoffIso)
+        .eq("highest_level", Math.max(1, highestLevel))
+        .gt("wallet_orbs", Math.max(0, walletOrbs));
+
+      const pending = [orbsQuery, levelsQuery, orbsRankQuery, levelsHigherQuery, levelsSameHigherOrbsQuery];
+      if (remoteSupportsBestTime) {
+        pending.push(
+          supabaseClient
+            .from(REMOTE_TABLE)
+            .select("device_id,best_time_ms")
+            .gte("updated_at", cutoffIso)
+            .gt("best_time_ms", 0)
+            .order("best_time_ms", { ascending: true })
+            .limit(GLOBAL_LEADERBOARD_LIMIT)
+        );
+        if (localSnapshot.best_time_ms > 0) {
+          pending.push(
+            supabaseClient
+              .from(REMOTE_TABLE)
+              .select("device_id", { count: "exact", head: true })
+              .gte("updated_at", cutoffIso)
+              .gt("best_time_ms", 0)
+              .lt("best_time_ms", localSnapshot.best_time_ms)
+          );
+        }
+      }
+
+      const responses = await Promise.all(pending);
+      const orbsRes = responses[0];
+      const levelsRes = responses[1];
+      const orbsRankRes = responses[2];
+      const levelsHigherRes = responses[3];
+      const levelsSameHigherOrbsRes = responses[4];
+      let timeData = [];
+      let timeError = null;
+      let timeRankRes = null;
+
+      if (remoteSupportsBestTime) {
+        const timeRes = responses[5];
+        timeData = Array.isArray(timeRes.data) ? timeRes.data : [];
+        timeError = timeRes.error || null;
+        timeRankRes = localSnapshot.best_time_ms > 0 ? responses[6] : null;
+        if (timeError && timeError.code === "42703") {
+          remoteSupportsBestTime = false;
+          timeError = null;
+          timeData = [];
+          timeRankRes = null;
+        }
+      }
+
+      const orbsData = Array.isArray(orbsRes.data) ? orbsRes.data : [];
+      const levelsData = Array.isArray(levelsRes.data) ? levelsRes.data : [];
+      globalLeaderboardState = {
+        orbs: orbsData,
+        levels: levelsData,
+        time: timeData
+      };
+      const orbsHigher = Math.max(0, readNumber(orbsRankRes.count, 0));
+      const levelsHigher = Math.max(0, readNumber(levelsHigherRes.count, 0));
+      const levelsSameHigher = Math.max(0, readNumber(levelsSameHigherOrbsRes.count, 0));
+      const timeHigher = timeRankRes ? Math.max(0, readNumber(timeRankRes.count, 0)) : 0;
+      globalLeaderboardRanks = {
+        orbs: orbsHigher + 1,
+        levels: levelsHigher + levelsSameHigher + 1,
+        time: localSnapshot.best_time_ms > 0 ? (timeHigher + 1) : null
+      };
+      globalLeaderboardFetchedAt = Date.now();
+
+      const hasTableError = [orbsRes.error, levelsRes.error, timeError].some((error) => error && error.code === "42P01");
+      if (hasTableError) {
+        setGlobalLeaderboardStatus("Leaderboard not active yet on server schema.");
+      } else if (orbsRes.error || levelsRes.error || timeError) {
+        setGlobalLeaderboardStatus("Leaderboard partially available, retry in a moment.");
+      } else {
+        setGlobalLeaderboardStatus(`Showing active players from last 2 hours. Updated ${new Date(globalLeaderboardFetchedAt).toLocaleTimeString()}.`);
+      }
+      renderGlobalLeaderboard();
+    } catch (_error) {
+      globalLeaderboardState = {
+        orbs: [localSnapshot],
+        levels: [localSnapshot],
+        time: localSnapshot.best_time_ms > 0 ? [localSnapshot] : []
+      };
+      globalLeaderboardRanks = {
+        orbs: 1,
+        levels: 1,
+        time: localSnapshot.best_time_ms > 0 ? 1 : null
+      };
+      setGlobalLeaderboardStatus("Leaderboard unavailable, showing local profile.");
+      renderGlobalLeaderboard();
+    } finally {
+      globalLeaderboardLoading = false;
+      globalLeaderboardBtn?.removeAttribute("aria-busy");
+    }
+  };
+
+  const showGlobalLeaderboardMenu = () => {
+    if (!globalLeaderboardMenu) {
+      return;
+    }
+    hideShopMenu();
+    hideChallengeMenu();
+    hideDailyMenu();
+    globalLeaderboardMenu.classList.remove("hidden");
+    globalLeaderboardMenu.setAttribute("aria-hidden", "false");
+    setGlobalLeaderboardTab(globalLeaderboardTab);
+    void refreshGlobalLeaderboard({ force: false });
+  };
+
+  const showDailyMenu = () => {
+    if (!dailyMenu) {
+      return;
+    }
+    hideShopMenu();
+    hideChallengeMenu();
+    hideGlobalLeaderboardMenu();
+    dailyInfo = buildDailyInfo();
+    if (dailyDateLabel) {
+      dailyDateLabel.textContent = formatDailyDateLabel(dailyInfo.dateKey);
+    }
+    syncDailyAccessUi(dailyInfo.dateKey);
+    dailyMenu.classList.remove("hidden");
+    dailyMenu.setAttribute("aria-hidden", "false");
+    setDailyStatusWithAccess("Loading daily leaderboard...");
+    renderDailyLeaderboard();
+    void refreshDailyLeaderboard();
   };
 
   const withGame = (callback) => {
@@ -598,6 +957,7 @@
     if (started) {
       hideShopMenu();
       hideChallengeMenu();
+      hideGlobalLeaderboardMenu();
       hideStartMenu();
     }
   };
@@ -611,6 +971,7 @@
     if (started) {
       hideShopMenu();
       hideChallengeMenu();
+      hideGlobalLeaderboardMenu();
       hideStartMenu();
     }
   };
@@ -673,6 +1034,157 @@
       hash = Math.imul(hash, 16777619);
     }
     return hash >>> 0;
+  };
+
+  const readDailyAttempts = () => {
+    try {
+      const raw = window.localStorage.getItem(DAILY_ATTEMPTS_KEY);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  };
+
+  const writeDailyAttempts = (attempts) => {
+    window.localStorage.setItem(DAILY_ATTEMPTS_KEY, JSON.stringify(attempts));
+  };
+
+  const getDailyAttemptsUsed = (dateKey) => {
+    const attempts = readDailyAttempts();
+    return Math.max(0, readNumber(attempts[dateKey], 0));
+  };
+
+  const getDailyAttemptsRemaining = (dateKey) =>
+    Math.max(0, DAILY_MAX_ATTEMPTS - getDailyAttemptsUsed(dateKey));
+
+  const isDailyUnlocked = () => highestLevel >= DAILY_UNLOCK_LEVEL;
+
+  const consumeDailyAttempt = (dateKey) => {
+    const attempts = readDailyAttempts();
+    const used = Math.max(0, readNumber(attempts[dateKey], 0));
+    attempts[dateKey] = Math.min(DAILY_MAX_ATTEMPTS, used + 1);
+    writeDailyAttempts(attempts);
+    return getDailyAttemptsRemaining(dateKey);
+  };
+
+  const syncDailyAccessUi = (dateKey = getDailyDateKey()) => {
+    const unlocked = isDailyUnlocked();
+    const remaining = unlocked ? getDailyAttemptsRemaining(dateKey) : 0;
+    if (dailyRunBtn) {
+      dailyRunBtn.disabled = !unlocked;
+      dailyRunBtn.textContent = unlocked ? "Daily" : `Daily Lv${DAILY_UNLOCK_LEVEL}`;
+      dailyRunBtn.setAttribute("aria-disabled", String(!unlocked));
+    }
+    if (dailyStartBtn) {
+      const canStart = unlocked && remaining > 0;
+      dailyStartBtn.disabled = !canStart;
+      dailyStartBtn.setAttribute("aria-disabled", String(!canStart));
+      if (!unlocked) {
+        dailyStartBtn.textContent = `Unlock Lv${DAILY_UNLOCK_LEVEL}`;
+      } else if (canStart) {
+        dailyStartBtn.textContent = `Start Daily (${remaining}/${DAILY_MAX_ATTEMPTS})`;
+      } else {
+        dailyStartBtn.textContent = "No Attempts Left";
+      }
+    }
+  };
+
+  const setDailyStatusWithAccess = (base = "") => {
+    const key = dailyInfo?.dateKey || getDailyDateKey();
+    syncDailyAccessUi(key);
+    if (!isDailyUnlocked()) {
+      setDailyStatus(`Unlock Daily at level ${DAILY_UNLOCK_LEVEL}. Current: ${highestLevel}.`);
+      return;
+    }
+    const remaining = getDailyAttemptsRemaining(key);
+    if (remaining <= 0) {
+      setDailyStatus(`No Daily attempts left (${DAILY_MAX_ATTEMPTS}/${DAILY_MAX_ATTEMPTS}). Reset at 00:00 UTC.`);
+      return;
+    }
+    const suffix = `Attempts left: ${remaining}/${DAILY_MAX_ATTEMPTS}.`;
+    setDailyStatus(base ? `${base} ${suffix}` : suffix);
+  };
+
+  const applyDailyGhostToGame = () => {
+    withGame((game) => {
+      if (!dailyTopReplay || !Array.isArray(dailyTopReplay.replay)) {
+        game.clearDailyReplayGhost?.();
+        return;
+      }
+      game.setDailyReplayGhost?.(dailyTopReplay.replay, dailyTopReplay.shape || "square");
+    });
+  };
+
+  const startDailyRun = () => {
+    stopChallengeSync();
+    dailyInfo = buildDailyInfo();
+    if (!isDailyUnlocked()) {
+      setDailyStatusWithAccess();
+      return;
+    }
+    if (getDailyAttemptsRemaining(dailyInfo.dateKey) <= 0) {
+      setDailyStatusWithAccess();
+      return;
+    }
+    const started = withGame((game) => {
+      game.clearGhostState?.();
+      game.startDailyRun?.(dailyInfo.level, { seed: dailyInfo.seed, dateKey: dailyInfo.dateKey });
+      applyDailyGhostToGame();
+    });
+    if (started) {
+      consumeDailyAttempt(dailyInfo.dateKey);
+      syncDailyAccessUi(dailyInfo.dateKey);
+      hideShopMenu();
+      hideChallengeMenu();
+      hideDailyMenu();
+      hideGlobalLeaderboardMenu();
+      hideStartMenu();
+    }
+  };
+
+  const getDailyDateKey = (date = new Date()) => {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(date.getUTCDate()).padStart(2, "0");
+    return `${y}${m}${d}`;
+  };
+
+  const formatDailyDateLabel = (dateKey) => {
+    if (!/^\d{8}$/.test(dateKey || "")) {
+      return "Daily";
+    }
+    const y = Number.parseInt(dateKey.slice(0, 4), 10);
+    const m = Number.parseInt(dateKey.slice(4, 6), 10) - 1;
+    const d = Number.parseInt(dateKey.slice(6, 8), 10);
+    const dt = new Date(Date.UTC(y, m, d));
+    return `Seed ${dateKey} - ${dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} UTC`;
+  };
+
+  const buildDailyInfo = () => {
+    const dateKey = getDailyDateKey();
+    const seed = hashStringToSeed(`daily:${dateKey}:slidey`);
+    return { dateKey, seed, level: DAILY_LEVEL };
+  };
+
+  const readDailyCache = () => {
+    try {
+      const raw = window.localStorage.getItem(DAILY_RUN_CACHE_KEY);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_error) {
+      return {};
+    }
+  };
+
+  const writeDailyCache = (cache) => {
+    window.localStorage.setItem(DAILY_RUN_CACHE_KEY, JSON.stringify(cache));
   };
 
   const buildChallengeInfo = () => {
@@ -1182,6 +1694,7 @@
     applyProgressToGame();
     updateMenuOrbsDisplay();
     updateShapeButtons();
+    syncDailyAccessUi();
   };
 
   const setButtonLabel = () => {
@@ -1340,30 +1853,194 @@
     }
   };
 
+  const refreshDailyLeaderboard = async () => {
+    dailyInfo = buildDailyInfo();
+    const cache = readDailyCache();
+    const cachedDay = cache[dailyInfo.dateKey];
+    if (cachedDay && Array.isArray(cachedDay.entries)) {
+      dailyLeaderboard = cachedDay.entries;
+    } else {
+      dailyLeaderboard = [];
+    }
+    renderDailyLeaderboard();
+
+    if (!supabaseClient) {
+      setDailyStatusWithAccess("Offline mode: leaderboard local.");
+      dailyTopReplay = dailyLeaderboard.find((entry) => entry.device_id !== deviceId && Array.isArray(entry.replay)) || null;
+      applyDailyGhostToGame();
+      return;
+    }
+
+    const { data, error } = await supabaseClient
+      .from(DAILY_RUNS_TABLE)
+      .select("date_key,device_id,player_alias,time_ms,replay,shape")
+      .eq("date_key", dailyInfo.dateKey)
+      .order("time_ms", { ascending: true })
+      .limit(10);
+
+    if (error) {
+      if (error.code === "42P01") {
+        setDailyStatusWithAccess("Daily online not active yet. Local daily tracking enabled.");
+        dailyTopReplay = dailyLeaderboard.find((entry) => entry.device_id !== deviceId && Array.isArray(entry.replay)) || null;
+        applyDailyGhostToGame();
+        return;
+      }
+      setDailyStatusWithAccess("Leaderboard unavailable, retry later.");
+      return;
+    }
+
+    dailyLeaderboard = Array.isArray(data) ? data : [];
+    cache[dailyInfo.dateKey] = { entries: dailyLeaderboard };
+    writeDailyCache(cache);
+    renderDailyLeaderboard();
+    const myEntry = dailyLeaderboard.find((entry) => entry.device_id === deviceId);
+    if (myEntry) {
+      setDailyStatusWithAccess(`Your best today: ${formatTime(myEntry.time_ms)}.`);
+    } else {
+      setDailyStatusWithAccess("Run the daily seed and place your time.");
+    }
+    dailyTopReplay = dailyLeaderboard.find((entry) => entry.device_id !== deviceId && Array.isArray(entry.replay)) || null;
+    applyDailyGhostToGame();
+  };
+
+  const submitDailyRun = async ({ dateKey, level, timeMs, replay, shape }) => {
+    if (!dateKey || !Number.isFinite(timeMs) || timeMs <= 0) {
+      return;
+    }
+    const safeReplay = Array.isArray(replay) ? replay.slice(0, 256) : [];
+    const cache = readDailyCache();
+    const day = cache[dateKey] && Array.isArray(cache[dateKey].entries) ? cache[dateKey].entries : [];
+    const existingLocal = day.find((entry) => entry.device_id === deviceId);
+    if (!existingLocal || timeMs < existingLocal.time_ms) {
+      const nextEntry = {
+        date_key: dateKey,
+        device_id: deviceId,
+        player_alias: getPlayerAlias(),
+        time_ms: Math.floor(timeMs),
+        replay: safeReplay,
+        shape: shape || selectedShape
+      };
+      const filtered = day.filter((entry) => entry.device_id !== deviceId);
+      filtered.push(nextEntry);
+      filtered.sort((a, b) => a.time_ms - b.time_ms);
+      cache[dateKey] = { entries: filtered.slice(0, 10) };
+      writeDailyCache(cache);
+    }
+
+    if (!supabaseClient) {
+      await refreshDailyLeaderboard();
+      return;
+    }
+
+    const { data: existing, error: existingError } = await supabaseClient
+      .from(DAILY_RUNS_TABLE)
+      .select("time_ms")
+      .eq("date_key", dateKey)
+      .eq("device_id", deviceId)
+      .maybeSingle();
+
+    if (existingError) {
+      if (existingError.code === "42P01") {
+        await refreshDailyLeaderboard();
+        return;
+      }
+      await refreshDailyLeaderboard();
+      return;
+    }
+    const prev = existing ? readNumber(existing.time_ms, 0) : 0;
+    if (prev > 0 && timeMs >= prev) {
+      await refreshDailyLeaderboard();
+      return;
+    }
+
+    const payload = {
+      date_key: dateKey,
+      device_id: deviceId,
+      player_alias: getPlayerAlias(),
+      level: Math.max(1, readNumber(level, DAILY_LEVEL)),
+      time_ms: Math.floor(timeMs),
+      replay: safeReplay,
+      shape: shape || selectedShape
+    };
+
+    const { error: upsertError } = await supabaseClient.from(DAILY_RUNS_TABLE).upsert(payload, { onConflict: "date_key,device_id" });
+    if (upsertError && upsertError.code !== "42P01") {
+      await refreshDailyLeaderboard();
+      return;
+    }
+    await refreshDailyLeaderboard();
+  };
+
   const fetchRemoteProfile = async () => {
+    if (remoteSupportsBestTime) {
+      const withBest = await supabaseClient
+        .from(REMOTE_TABLE)
+        .select("wallet_orbs,highest_level,best_time_ms")
+        .eq("device_id", deviceId)
+        .single();
+      if (!withBest.error) {
+        return withBest.data || null;
+      }
+      if (withBest.error.code === "42703") {
+        remoteSupportsBestTime = false;
+      } else if (withBest.error.code !== "PGRST116") {
+        throw withBest.error;
+      } else {
+        return null;
+      }
+    }
+
     const { data, error } = await supabaseClient
       .from(REMOTE_TABLE)
       .select("wallet_orbs,highest_level")
       .eq("device_id", deviceId)
       .single();
-
     if (error && error.code !== "PGRST116") {
       throw error;
     }
-
     return data || null;
   };
 
   const upsertRemoteProfile = async () => {
+    const localBest = getBestTimeMsLocal();
     const payload = {
       device_id: deviceId,
       wallet_orbs: walletOrbs,
       highest_level: highestLevel
     };
+    if (remoteSupportsBestTime) {
+      const withBestPayload = {
+        ...payload,
+        best_time_ms: localBest > 0 ? localBest : null
+      };
+      const { error } = await supabaseClient.from(REMOTE_TABLE).upsert(withBestPayload, { onConflict: "device_id" });
+      if (!error) {
+        return;
+      }
+      if (error.code === "42703") {
+        remoteSupportsBestTime = false;
+      } else {
+        throw error;
+      }
+    }
     const { error } = await supabaseClient.from(REMOTE_TABLE).upsert(payload, { onConflict: "device_id" });
     if (error) {
       throw error;
     }
+  };
+
+  const startProfileHeartbeat = () => {
+    if (profileHeartbeatTimer) {
+      window.clearInterval(profileHeartbeatTimer);
+      profileHeartbeatTimer = null;
+    }
+    if (!supabaseClient) {
+      return;
+    }
+    profileHeartbeatTimer = window.setInterval(() => {
+      void upsertRemoteProfile().catch(() => {
+      });
+    }, 5 * 60 * 1000);
   };
 
   const syncWithRemote = async () => {
@@ -1379,6 +2056,13 @@
 
     const mergedWallet = Math.max(walletOrbs, readNumber(remote.wallet_orbs, 0));
     const mergedLevel = Math.max(highestLevel, readNumber(remote.highest_level, 1));
+    const remoteBest = Math.max(0, readNumber(remote.best_time_ms, 0));
+    const localBest = getBestTimeMsLocal();
+    const mergedBest = localBest > 0 && remoteBest > 0 ? Math.min(localBest, remoteBest) : Math.max(localBest, remoteBest);
+    if (mergedBest > 0 && (localBest <= 0 || mergedBest < localBest)) {
+      window.localStorage.setItem(BEST_TIME_KEY, String(mergedBest));
+      updateBestTimeDisplay(mergedBest);
+    }
     setLocalState(mergedWallet, mergedLevel);
     await upsertRemoteProfile();
   };
@@ -1428,12 +2112,14 @@
     applyWalletToGame();
     applyProgressToGame();
     applyShapeToGame();
+    syncDailyAccessUi();
     bootstrapSupabase();
     refreshInstallGate();
 
     if (supabaseClient) {
       void syncWithRemote().catch(() => {
       });
+      startProfileHeartbeat();
     }
 
     ensureGameReady();
@@ -1443,6 +2129,7 @@
     void handleInstallAction();
   });
   startRunBtn?.addEventListener("click", startNormalRun);
+  dailyRunBtn?.addEventListener("click", showDailyMenu);
   challengeBtn?.addEventListener("click", showChallengeMenu);
   tutorialBtn?.addEventListener("click", startTutorialRun);
   storeBtn?.addEventListener("click", showShopMenu);
@@ -1461,7 +2148,28 @@
   closeChallengeBtn?.addEventListener("click", () => {
     stopChallengeSync();
     hideChallengeMenu();
+    hideGlobalLeaderboardMenu();
     closeChallengeJoinPanel({ clear: true });
+    showStartMenu();
+  });
+  dailyStartBtn?.addEventListener("click", startDailyRun);
+  dailyCloseBtn?.addEventListener("click", () => {
+    hideDailyMenu();
+    hideGlobalLeaderboardMenu();
+    showStartMenu();
+  });
+  globalLeaderboardBtn?.addEventListener("click", showGlobalLeaderboardMenu);
+  globalLbTabOrbs?.addEventListener("click", () => {
+    setGlobalLeaderboardTab("orbs");
+  });
+  globalLbTabTime?.addEventListener("click", () => {
+    setGlobalLeaderboardTab("time");
+  });
+  globalLbTabLevels?.addEventListener("click", () => {
+    setGlobalLeaderboardTab("levels");
+  });
+  globalLeaderboardCloseBtn?.addEventListener("click", () => {
+    hideGlobalLeaderboardMenu();
     showStartMenu();
   });
   challengeCodeInput?.addEventListener("input", () => {
@@ -1499,15 +2207,32 @@
   window.addEventListener("slidey:tutorial-complete", handleTutorialComplete);
   window.addEventListener("slidey:best-time-updated", (event) => {
     updateBestTimeDisplay(readNumber(event.detail?.bestTimeMs, 0));
+    if (supabaseClient) {
+      void upsertRemoteProfile().catch(() => {
+      });
+    }
   });
   window.addEventListener("slidey:return-to-main", () => {
     stopChallengeSync();
     window.__slideyGame?.clearGhostState?.();
+    window.__slideyGame?.clearDailyReplayGhost?.();
     window.__slideyGame?.enterMenuDemo?.();
     hideShopMenu();
     hideChallengeMenu();
+    hideDailyMenu();
+    hideGlobalLeaderboardMenu();
     hideChallengeResultScreen();
     showStartMenu();
+  });
+  window.addEventListener("slidey:daily-finished", (event) => {
+    const dateKey = typeof event.detail?.dateKey === "string" ? event.detail.dateKey : getDailyDateKey();
+    const level = readNumber(event.detail?.level, DAILY_LEVEL);
+    const timeMs = readNumber(event.detail?.timeMs, 0);
+    const replay = Array.isArray(event.detail?.replay) ? event.detail.replay : [];
+    const shape = typeof event.detail?.shape === "string" ? event.detail.shape : selectedShape;
+    if (timeMs > 0) {
+      void submitDailyRun({ dateKey, level, timeMs, replay, shape });
+    }
   });
   window.addEventListener("slidey:level-started", (event) => {
     const level = readNumber(event.detail?.level, 1);
@@ -1535,6 +2260,12 @@
   window.addEventListener("pageshow", refreshInstallGate);
   window.addEventListener("resize", refreshInstallGate);
   window.addEventListener("orientationchange", refreshInstallGate);
+  window.addEventListener("pagehide", () => {
+    if (profileHeartbeatTimer) {
+      window.clearInterval(profileHeartbeatTimer);
+      profileHeartbeatTimer = null;
+    }
+  });
 
   if (window.matchMedia) {
     const displayModeQuery = window.matchMedia("(display-mode: standalone)");

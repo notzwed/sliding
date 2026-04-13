@@ -93,11 +93,15 @@
       this.isMenuDemo = false;
       this.isTutorialRun = false;
       this.isChallengeRun = false;
+      this.isDailyRun = false;
+      this.dailyDateKey = "";
       this.challengeCode = "";
       this.challengeSeed = 0;
       this.tutorialStage = 0;
       this.tutorialFlow = null;
       this.ghostState = null;
+      this.dailyReplayTrack = [];
+      this.dailyReplayGhost = null;
       this.tutorialStep = 0;
       this.demoStepCooldown = 0;
       this.demoPrevStopKey = "";
@@ -198,6 +202,12 @@
       const seed = Number.isFinite(challenge.seed) ? (challenge.seed >>> 0) : ((Date.now() ^ Math.floor(Math.random() * 2147483647)) >>> 0);
       const code = typeof challenge.code === "string" ? challenge.code : "";
       this.startLevel(level, { challenge: true, challengeSeed: seed, challengeCode: code });
+    }
+
+    startDailyRun(level = 1, daily = {}) {
+      const seed = Number.isFinite(daily.seed) ? (daily.seed >>> 0) : ((Date.now() ^ 0x5f3759df) >>> 0);
+      const dateKey = typeof daily.dateKey === "string" ? daily.dateKey : "";
+      this.startLevel(level, { daily: true, dailySeed: seed, dailyDateKey: dateKey });
     }
 
     enterMenuDemo() {
@@ -364,13 +374,18 @@
       const tutorial = Boolean(options.tutorial);
       const menuDemo = Boolean(options.menuDemo);
       const challenge = Boolean(options.challenge);
+      const daily = Boolean(options.daily);
       const tutorialStage = Number.isFinite(options.tutorialStage) ? Math.max(0, Math.floor(options.tutorialStage)) : 0;
       const challengeSeed = Number.isFinite(options.challengeSeed) ? (options.challengeSeed >>> 0) : 0;
       const challengeCode = typeof options.challengeCode === "string" ? options.challengeCode : "";
+      const dailySeed = Number.isFinite(options.dailySeed) ? (options.dailySeed >>> 0) : 0;
+      const dailyDateKey = typeof options.dailyDateKey === "string" ? options.dailyDateKey : "";
       this.phase = "playing";
       this.level = Math.max(1, Math.min(level, BASE_CONFIG.maxLevel));
       this.isTutorialRun = tutorial;
       this.isChallengeRun = challenge;
+      this.isDailyRun = daily;
+      this.dailyDateKey = daily ? dailyDateKey : "";
       this.challengeSeed = challenge ? challengeSeed : 0;
       this.challengeCode = challenge ? challengeCode : "";
       this.tutorialStage = tutorial ? tutorialStage : 0;
@@ -379,7 +394,9 @@
       this.demoStepCooldown = 0;
       this.levelData = tutorial
         ? this.buildTutorialLevel(this.tutorialStage)
-        : (challenge ? this.buildLevelFromSeed(this.level, this.challengeSeed || 1) : this.buildLevel(this.level));
+        : (challenge
+          ? this.buildLevelFromSeed(this.level, this.challengeSeed || 1)
+          : (daily ? this.buildLevelFromSeed(this.level, dailySeed || 1) : this.buildLevel(this.level)));
       this.player = {
         x: this.levelData.start.x,
         y: this.levelData.start.y,
@@ -395,6 +412,7 @@
       this.demoRecentStops = [startKey];
       this.demoStopVisitCounts = new Map([[startKey, 1]]);
       this.demoIdleTime = 0;
+      this.dailyReplayTrack = [{ t: 0, x: this.player.x, y: this.player.y }];
       this.moveState = null;
       this.pendingDirection = null;
       this.levelTime = 0;
@@ -438,7 +456,12 @@
         );
       } else {
         this.hideTutorialDialog();
-        if (challenge) {
+        if (daily) {
+          this.setStatusText(
+            "Daily run active: same seeded maze for everyone today.",
+            "Daily run active."
+          );
+        } else if (challenge) {
           this.setStatusText(
             "Challenge mode attiva: stessa mappa per entrambi, effetti indipendenti.",
             "Challenge attiva."
@@ -1947,6 +1970,7 @@
       this.checkTutorialCheckpoint();
       this.updateGhost(delta);
       this.updateCamera();
+      this.updateDailyReplayGhost();
 
       if (this.isCollapsed(this.player.x, this.player.y)) {
         this.beginLoseSequence();
@@ -2008,6 +2032,7 @@
       this.checkTutorialCheckpoint();
       this.updateGhost(delta);
       this.updateCamera();
+      this.updateDailyReplayGhost();
 
       if (this.isCollapsed(this.player.x, this.player.y)) {
         this.beginLoseSequence();
@@ -2580,6 +2605,16 @@
           this.player.y = this.moveState.to.y;
           this.player.renderX = this.player.x;
           this.player.renderY = this.player.y;
+          if (this.isDailyRun) {
+            this.dailyReplayTrack.push({
+              t: Math.max(0, Number(this.runClockTime || 0)),
+              x: this.player.x,
+              y: this.player.y
+            });
+            if (this.dailyReplayTrack.length > 256) {
+              this.dailyReplayTrack.shift();
+            }
+          }
           if (this.player.x === this.levelData.exit.x && this.player.y === this.levelData.exit.y) {
             this.moveState = null;
             this.beginExitSequence();
@@ -2740,6 +2775,17 @@
             timeMs: this.currentRunTimeMs
           }
         }));
+        if (this.isDailyRun) {
+          window.dispatchEvent(new CustomEvent("slidey:daily-finished", {
+            detail: {
+              dateKey: this.dailyDateKey,
+              level: this.level,
+              timeMs: this.currentRunTimeMs,
+              replay: this.dailyReplayTrack.slice(0, 256),
+              shape: this.playerShape
+            }
+          }));
+        }
       }
 
       if (!this.isTutorialRun) {
@@ -2986,6 +3032,7 @@
       this.drawFocusMask(ctx);
       this.drawImpactEffect(ctx);
       this.drawGhost(ctx);
+      this.drawDailyReplayGhost(ctx);
       this.drawPlayer(ctx);
       this.drawViewportFrame(ctx);
       ctx.restore();
@@ -3751,6 +3798,96 @@
       ctx.fillStyle = "rgba(180,230,255,0.9)";
       this.drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY);
       ctx.restore();
+    }
+
+    drawDailyReplayGhost(ctx) {
+      if (!this.isDailyRun || !this.dailyReplayGhost || !this.dailyReplayGhost.current) {
+        return;
+      }
+      if (this.phase === "lost" || this.phase === "won") {
+        return;
+      }
+      const current = this.dailyReplayGhost.current;
+      const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
+      const position = this.toScreen(current.x, current.y);
+      const centerX = position.x + cellSize / 2;
+      const centerY = position.y + cellSize / 2;
+      const size = cellSize * 0.4;
+      const shape = PLAYER_SHAPES.has(this.dailyReplayGhost.shape) ? this.dailyReplayGhost.shape : "square";
+      const width = size;
+      const height = size;
+      const px = centerX - width / 2;
+      const py = centerY - height / 2;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
+      ctx.clip();
+      ctx.globalAlpha = 0.24;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = "rgba(184,224,255,0.42)";
+      ctx.fillStyle = "rgba(184,224,255,0.9)";
+      this.drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY);
+      ctx.restore();
+    }
+
+    updateDailyReplayGhost() {
+      if (!this.isDailyRun || !this.dailyReplayGhost || !Array.isArray(this.dailyReplayGhost.points)) {
+        return;
+      }
+      if (this.phase !== "playing") {
+        return;
+      }
+      const points = this.dailyReplayGhost.points;
+      if (points.length < 2) {
+        return;
+      }
+      const time = Math.max(0, Number(this.runClockTime || 0));
+      let index = this.dailyReplayGhost.index || 0;
+      while (index < points.length - 2 && points[index + 1].t <= time) {
+        index += 1;
+      }
+      this.dailyReplayGhost.index = index;
+      const a = points[index];
+      const b = points[Math.min(points.length - 1, index + 1)];
+      if (!a || !b) {
+        return;
+      }
+      const span = Math.max(0.001, b.t - a.t);
+      const p = this.clamp((time - a.t) / span, 0, 1);
+      this.dailyReplayGhost.current = {
+        x: this.lerp(a.x, b.x, p),
+        y: this.lerp(a.y, b.y, p)
+      };
+    }
+
+    setDailyReplayGhost(replay, shape = "square") {
+      if (!Array.isArray(replay) || replay.length < 2) {
+        this.dailyReplayGhost = null;
+        return;
+      }
+      const points = replay
+        .map((p) => ({
+          t: Math.max(0, Number(p.t || 0)),
+          x: Number(p.x),
+          y: Number(p.y)
+        }))
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+        .sort((a, b) => a.t - b.t);
+      if (points.length < 2) {
+        this.dailyReplayGhost = null;
+        return;
+      }
+      this.dailyReplayGhost = {
+        points: points.slice(0, 256),
+        shape,
+        index: 0,
+        current: { x: points[0].x, y: points[0].y }
+      };
+    }
+
+    clearDailyReplayGhost() {
+      this.dailyReplayGhost = null;
     }
 
     updateGhost(delta) {

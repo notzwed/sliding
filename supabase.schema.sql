@@ -3,9 +3,36 @@ create table if not exists public.player_profiles (
   device_id text primary key,
   wallet_orbs integer not null default 0 check (wallet_orbs >= 0),
   highest_level integer not null default 1 check (highest_level >= 1),
+  best_time_ms integer check (best_time_ms > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.player_profiles
+add column if not exists best_time_ms integer;
+
+alter table public.player_profiles
+drop constraint if exists player_profiles_best_time_ms_check;
+
+alter table public.player_profiles
+add constraint player_profiles_best_time_ms_check
+check (best_time_ms is null or best_time_ms > 0);
+
+create index if not exists idx_player_profiles_best_time
+on public.player_profiles (best_time_ms asc nulls last);
+
+create index if not exists idx_player_profiles_updated_at
+on public.player_profiles (updated_at desc);
+
+create index if not exists idx_player_profiles_active_orbs
+on public.player_profiles (updated_at desc, wallet_orbs desc);
+
+create index if not exists idx_player_profiles_active_levels
+on public.player_profiles (updated_at desc, highest_level desc, wallet_orbs desc);
+
+create index if not exists idx_player_profiles_active_best_time
+on public.player_profiles (updated_at desc, best_time_ms asc)
+where best_time_ms is not null;
 
 alter table public.player_profiles enable row level security;
 
@@ -155,3 +182,59 @@ create trigger trg_level_records_updated_at
 before update on public.level_records
 for each row
 execute procedure public.touch_level_records_updated_at();
+
+-- Daily seeded run leaderboard (one best run per player per UTC day)
+create table if not exists public.daily_runs (
+  date_key text not null check (date_key ~ '^[0-9]{8}$'),
+  device_id text not null,
+  player_alias text not null default 'Runner',
+  level integer not null default 1 check (level >= 1),
+  time_ms integer not null check (time_ms > 0),
+  replay jsonb not null default '[]'::jsonb,
+  shape text not null default 'square',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (date_key, device_id),
+  constraint daily_runs_replay_is_array check (jsonb_typeof(replay) = 'array')
+);
+
+create index if not exists idx_daily_runs_date_time
+on public.daily_runs (date_key, time_ms asc);
+
+alter table public.daily_runs enable row level security;
+
+drop policy if exists "daily_runs_select" on public.daily_runs;
+drop policy if exists "daily_runs_insert" on public.daily_runs;
+drop policy if exists "daily_runs_update" on public.daily_runs;
+
+create policy "daily_runs_select"
+on public.daily_runs
+for select
+using (true);
+
+create policy "daily_runs_insert"
+on public.daily_runs
+for insert
+with check (true);
+
+create policy "daily_runs_update"
+on public.daily_runs
+for update
+using (true)
+with check (true);
+
+create or replace function public.touch_daily_runs_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_daily_runs_updated_at on public.daily_runs;
+create trigger trg_daily_runs_updated_at
+before update on public.daily_runs
+for each row
+execute procedure public.touch_daily_runs_updated_at();
