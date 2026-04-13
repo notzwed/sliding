@@ -103,6 +103,7 @@
       this.dailyReplayTrack = [];
       this.dailyReplayGhost = null;
       this.tutorialStep = 0;
+      this.tutorialAdvanceTimer = null;
       this.demoStepCooldown = 0;
       this.demoPrevStopKey = "";
       this.demoLastStopKey = "";
@@ -433,6 +434,10 @@
       this.levelOrbCollected = 0;
       this.freezeWaveOrigin = null;
       this.tutorialFlow = null;
+      if (this.tutorialAdvanceTimer) {
+        window.clearTimeout(this.tutorialAdvanceTimer);
+        this.tutorialAdvanceTimer = null;
+      }
       if (!challenge) {
         this.ghostState = null;
       }
@@ -634,25 +639,25 @@
     getTutorialScript(stage) {
       const scripts = [
         [
-          { text: "Hi, I am Slidey. Tap Next to continue." },
-          { text: "Core mechanic: swipe once and slide until a wall stops you.", waitFor: "move" },
-          { text: "Follow the route and reach the upper corner.", waitFor: "reach_stage1_corner" },
-          { text: "Good. Now collect one white orb.", waitFor: "collect_normal" },
-          { text: "Nice. Reach the gate to finish tutorial stage one.", waitFor: "complete_stage" }
+          { text: "Hi, I am Slidey. Quick tutorial: 3 short steps and you are in.", cta: "Start" },
+          { text: "Swipe once: your shape keeps sliding until a wall stops it.", waitFor: "move", cta: "Got it" },
+          { text: "Follow the corridor and reach the upper corner first.", waitFor: "reach_stage1_corner", cta: "Go" },
+          { text: "Great. Collect one white orb.", waitFor: "collect_normal", cta: "Go" },
+          { text: "Perfect. Reach the gate to finish tutorial stage one.", waitFor: "complete_stage", cta: "Go" }
         ],
         [
-          { text: "Tutorial 2: this route teaches the red orb." },
-          { text: "First, reach the middle lane on the right side.", waitFor: "reach_stage2_mid" },
-          { text: "Collect the red orb: collapse freezes for 4 seconds.", waitFor: "collect_freeze" },
-          { text: "Use that window and close the gate.", waitFor: "complete_stage" }
+          { text: "Stage 2: red orb training.", cta: "Continue" },
+          { text: "Move to the middle lane on the right side.", waitFor: "reach_stage2_mid", cta: "Go" },
+          { text: "Collect the red orb: collapse freezes for 4 seconds.", waitFor: "collect_freeze", cta: "Go" },
+          { text: "Use that safe window and close the gate.", waitFor: "complete_stage", cta: "Go" }
         ],
         [
-          { text: "Tutorial 3: yellow orb gives time bonus and orb multiplier." },
-          { text: "Move into the side branch.", waitFor: "reach_stage3_branch" },
-          { text: "Collect the yellow orb.", waitFor: "collect_multiplier" },
-          { text: "Return to the lane and stabilize your path.", waitFor: "reach_stage3_lane" },
-          { text: "Now collect at least one normal orb while the boost is active.", waitFor: "collect_while_multiplier" },
-          { text: "Close the gate to finish tutorial and claim 20 bonus orbs.", waitFor: "complete_stage" }
+          { text: "Stage 3: yellow orb gives time cut and x2 orb gain.", cta: "Continue" },
+          { text: "Move into the side branch.", waitFor: "reach_stage3_branch", cta: "Go" },
+          { text: "Collect the yellow orb.", waitFor: "collect_multiplier", cta: "Go" },
+          { text: "Return to the lane and stabilize your line.", waitFor: "reach_stage3_lane", cta: "Go" },
+          { text: "Collect one normal orb while x2 is active.", waitFor: "collect_while_multiplier", cta: "Go" },
+          { text: "Close the gate to finish tutorial and claim 20 bonus orbs.", waitFor: "complete_stage", cta: "Go" }
         ]
       ];
       return scripts[this.clamp(stage, 0, scripts.length - 1)];
@@ -700,6 +705,9 @@
         this.tutorialDialogMeta.textContent = `Tutorial ${stageLabel}/3 - Step ${stepLabel}/${this.tutorialFlow.script.length}`;
       }
       this.tutorialDialogText.textContent = step.text;
+      if (this.tutorialDialogNext) {
+        this.tutorialDialogNext.textContent = step.cta || (step.waitFor ? "Go" : "Next");
+      }
       this.tutorialBlur?.classList.remove("hidden");
       this.tutorialDialog.classList.remove("hidden");
       this.canvas.parentElement?.classList.add("tutorial-focus");
@@ -721,6 +729,7 @@
       }
       if (step.waitFor) {
         this.tutorialFlow.waitingFor = step.waitFor;
+        this.setTutorialObjectiveStatus(step.waitFor);
         this.hideTutorialDialog();
         return;
       }
@@ -737,7 +746,68 @@
       }
       this.tutorialFlow.waitingFor = null;
       this.tutorialFlow.index += 1;
-      this.showTutorialDialogStep();
+      this.setStatusText("Perfect. Keep the flow.", "Perfect.");
+      if (this.tutorialAdvanceTimer) {
+        window.clearTimeout(this.tutorialAdvanceTimer);
+        this.tutorialAdvanceTimer = null;
+      }
+      this.tutorialAdvanceTimer = window.setTimeout(() => {
+        this.tutorialAdvanceTimer = null;
+        if (!this.isTutorialRun) {
+          return;
+        }
+        this.showTutorialDialogStep();
+      }, 220);
+    }
+
+    setTutorialObjectiveStatus(waitFor) {
+      const hints = {
+        move: {
+          full: "Objective: perform one swipe to start sliding.",
+          compact: "Objective: do one swipe."
+        },
+        reach_stage1_corner: {
+          full: "Objective: reach the upper corner marker.",
+          compact: "Reach upper corner."
+        },
+        collect_normal: {
+          full: "Objective: collect one white orb.",
+          compact: "Collect one white orb."
+        },
+        complete_stage: {
+          full: "Objective: close the gate to complete this stage.",
+          compact: "Reach the gate."
+        },
+        reach_stage2_mid: {
+          full: "Objective: reach the right middle lane.",
+          compact: "Reach mid lane."
+        },
+        collect_freeze: {
+          full: "Objective: collect the red orb to freeze collapse.",
+          compact: "Collect red orb."
+        },
+        reach_stage3_branch: {
+          full: "Objective: enter the side branch.",
+          compact: "Enter branch."
+        },
+        collect_multiplier: {
+          full: "Objective: collect the yellow multiplier orb.",
+          compact: "Collect yellow orb."
+        },
+        reach_stage3_lane: {
+          full: "Objective: return to the lane.",
+          compact: "Return to lane."
+        },
+        collect_while_multiplier: {
+          full: "Objective: collect one white orb while x2 is active.",
+          compact: "Collect orb with x2."
+        }
+      };
+      const hint = hints[waitFor];
+      if (!hint) {
+        return;
+      }
+      this.setStatusText(hint.full, hint.compact);
     }
 
     checkTutorialCheckpoint() {

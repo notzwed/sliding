@@ -26,6 +26,7 @@
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
   const appUpdateBtn = document.getElementById("appUpdateBtn");
+  const startupSplash = document.getElementById("startupSplash");
   const startMenu = document.getElementById("startMenu");
   const bestTimeValue = document.getElementById("bestTimeValue");
   const menuOrbsValue = document.getElementById("menuOrbsValue");
@@ -131,6 +132,7 @@
   let updateApplyInProgress = false;
   let updateCheckIntervalId = null;
   let lastUpdateCheckAt = 0;
+  let startupSplashDone = false;
 
   const isIos = () => /iPad|iPhone|iPod/.test(window.navigator.userAgent) ||
     (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
@@ -198,6 +200,28 @@
   const getNeedsCommitRefresh = () => {
     const seen = getSeenRemoteCommit();
     return Boolean(latestRemoteCommitSha && seen && latestRemoteCommitSha !== seen);
+  };
+
+  const runStartupSplash = () => {
+    if (!startupSplash || startupSplashDone) {
+      return;
+    }
+    startupSplashDone = true;
+    const reducedMotion = Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (reducedMotion) {
+      startupSplash.classList.add("is-done");
+      return;
+    }
+    startupSplash.classList.add("is-playing");
+    const revealDelayMs = 3000;
+    const doneDelayMs = 4100;
+    window.setTimeout(() => {
+      startupSplash.classList.add("is-revealing");
+    }, revealDelayMs);
+    window.setTimeout(() => {
+      startupSplash.classList.remove("is-playing", "is-revealing");
+      startupSplash.classList.add("is-done");
+    }, doneDelayMs);
   };
 
   const requestServiceWorkerUpdate = async () => {
@@ -2086,6 +2110,7 @@
   };
 
   const init = () => {
+    runStartupSplash();
     setupClientHardening();
     deviceId = getOrCreateDeviceId();
     walletOrbs = Math.max(0, readNumber(window.localStorage.getItem(GUEST_WALLET_KEY), 0));

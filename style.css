@@ -318,6 +318,81 @@ body.install-locked .app-shell {
   display: none !important;
 }
 
+.startup-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: #000;
+  pointer-events: auto;
+  opacity: 1;
+  overflow: hidden;
+}
+
+.startup-splash-inner {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.startup-title,
+.startup-byline,
+.startup-heart-icon {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.startup-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 9vw, 4.6rem);
+  letter-spacing: 0.22em;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.24);
+}
+
+.startup-byline {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: clamp(0.72rem, 2.6vw, 0.92rem);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.startup-heart-icon {
+  display: block;
+  width: clamp(96px, 18vw, 164px);
+  height: auto;
+  transform-origin: center;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.18));
+}
+
+.startup-splash.is-playing .startup-title {
+  animation: splashFadeIn 1300ms cubic-bezier(0.22, 1, 0.36, 1) 180ms forwards;
+}
+
+.startup-splash.is-playing .startup-byline {
+  animation: splashFadeIn 1100ms cubic-bezier(0.22, 1, 0.36, 1) 1120ms forwards;
+}
+
+.startup-splash.is-playing .startup-heart-icon {
+  animation: splashFadeIn 1100ms cubic-bezier(0.22, 1, 0.36, 1) 1460ms forwards;
+}
+
+.startup-splash.is-revealing {
+  animation: splashFadeOut 980ms ease-out forwards;
+}
+
+.startup-splash.is-done {
+  display: none;
+}
+
 .app-update-btn {
   position: fixed;
   z-index: 40;
@@ -1307,6 +1382,23 @@ body.update-prompt-active .app-update-btn {
   50% { transform: rotate(12deg) scale(0.94, 1.1); }
 }
 
+@keyframes splashFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes splashFadeOut {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+
 .daily-menu {
   position: fixed;
   inset: 0;
@@ -1415,37 +1507,14 @@ body.update-prompt-active .app-update-btn {
 }
 
 .global-leaderboard-icon {
-  position: relative;
   display: block;
-  width: 20px;
-  height: 18px;
-  margin: 0 auto;
-}
-
-.global-leaderboard-icon::before,
-.global-leaderboard-icon::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
-}
-
-.global-leaderboard-icon::before {
-  left: 0;
-  width: 4px;
-  height: 8px;
-  box-shadow:
-    8px -4px 0 rgba(255, 255, 255, 0.9),
-    16px -8px 0 rgba(255, 255, 255, 0.9);
-}
-
-.global-leaderboard-icon::after {
-  left: -1px;
   width: 22px;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.6);
+  height: 22px;
+  margin: 0 auto;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.22));
 }
 
 .global-leaderboard-menu {
@@ -1980,5 +2049,13 @@ body.update-prompt-active .app-update-btn {
   .glitch-letter::after {
     animation: none;
     transition: none;
+  }
+
+  .startup-splash,
+  .startup-title,
+  .startup-byline,
+  .startup-heart-icon {
+    animation: none !important;
+    transition: none !important;
   }
 }
