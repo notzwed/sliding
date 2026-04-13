@@ -177,6 +177,9 @@
     showAppUpdateButton("Updating...", true);
     const waiting = swRegistration.waiting;
     if (waiting) {
+      if (latestRemoteCommitSha) {
+        markRemoteCommitSeen(latestRemoteCommitSha);
+      }
       waiting.postMessage({ type: "SKIP_WAITING" });
       window.setTimeout(() => {
         updateApplyInProgress = false;
@@ -185,6 +188,9 @@
     }
     const hasWaitingAfterUpdate = await requestServiceWorkerUpdate();
     if (hasWaitingAfterUpdate) {
+      if (latestRemoteCommitSha) {
+        markRemoteCommitSeen(latestRemoteCommitSha);
+      }
       swRegistration.waiting?.postMessage({ type: "SKIP_WAITING" });
       window.setTimeout(() => {
         updateApplyInProgress = false;
@@ -192,6 +198,9 @@
       return;
     }
     if (isStandalone() && getNeedsCommitRefresh()) {
+      if (latestRemoteCommitSha) {
+        markRemoteCommitSeen(latestRemoteCommitSha);
+      }
       const url = new URL(window.location.href);
       url.searchParams.set("refresh", String(Date.now()));
       window.location.replace(url.toString());
@@ -264,6 +273,9 @@
           handleUpdateReady();
         }
         return true;
+      }
+      if (!appUpdateReady) {
+        hideAppUpdateButton();
       }
       return false;
     } catch (_error) {
