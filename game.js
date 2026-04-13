@@ -110,6 +110,9 @@
       this.backdropCache = null;
       this.focusMaskCache = null;
       this.exitVisualCache = new Map();
+      this.lastCanvasWidth = 0;
+      this.lastCanvasHeight = 0;
+      this.lastCanvasPixelRatio = 0;
       this.camera = { x: 0, y: 0 };
       this.cameraVelocity = { x: 0, y: 0 };
       this.renderCamera = { x: 0, y: 0 };
@@ -311,13 +314,29 @@
       const width = stage.clientWidth;
       const height = stage.clientHeight;
       this.performanceProfile = this.computePerformanceProfile(width, height);
-      this.pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, this.performanceProfile.pixelRatioCap));
+      const nextPixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, this.performanceProfile.pixelRatioCap));
+      document.body.classList.toggle("hq-mobile", Boolean(this.performanceProfile.highQualityMobile));
+      const sizeUnchanged = Math.abs(width - this.lastCanvasWidth) < 1 && Math.abs(height - this.lastCanvasHeight) < 1;
+      const ratioUnchanged = Math.abs(nextPixelRatio - this.lastCanvasPixelRatio) < 0.01;
+      if (sizeUnchanged && ratioUnchanged && this.levelData) {
+        this.pixelRatio = nextPixelRatio;
+        this.updateBoardMetrics();
+        return;
+      }
+      this.pixelRatio = nextPixelRatio;
 
       this.canvas.width = Math.floor(width * this.pixelRatio);
       this.canvas.height = Math.floor(height * this.pixelRatio);
       this.canvas.style.width = `${width}px`;
       this.canvas.style.height = `${height}px`;
       this.ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
+      this.ctx.imageSmoothingEnabled = true;
+      if ("imageSmoothingQuality" in this.ctx) {
+        this.ctx.imageSmoothingQuality = this.performanceProfile.highQualityMobile ? "high" : "medium";
+      }
+      this.lastCanvasWidth = width;
+      this.lastCanvasHeight = height;
+      this.lastCanvasPixelRatio = this.pixelRatio;
       this.buildBackdropCache(width, height);
       this.buildFocusMaskCache(width, height);
       this.exitVisualCache.clear();
@@ -4570,26 +4589,56 @@
 
     computePerformanceProfile(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
       const coarsePointer = this.isCoarsePointer();
+      const reducedMotion = Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
       const shortEdge = Math.max(1, Math.min(viewportWidth || 0, viewportHeight || 0));
       const longEdge = Math.max(1, Math.max(viewportWidth || 0, viewportHeight || 0));
       const viewportArea = Math.max(1, shortEdge * longEdge);
       const ultraCompact = coarsePointer && shortEdge < 420;
-      const reducedEffects = coarsePointer && shortEdge < 360;
-      const renderBudget = coarsePointer ? (ultraCompact ? 1850000 : 2450000) : 5600000;
+      const deviceMemory = Number(window.navigator?.deviceMemory || 0);
+      const cpuCores = Number(window.navigator?.hardwareConcurrency || 0);
+      const connection = window.navigator?.connection;
+      const saveData = Boolean(connection?.saveData);
+      const effectiveType = String(connection?.effectiveType || "");
+      const lowPowerTouch = coarsePointer && (
+        saveData ||
+        effectiveType === "slow-2g" ||
+        effectiveType === "2g" ||
+        (deviceMemory > 0 && deviceMemory <= 3) ||
+        (cpuCores > 0 && cpuCores <= 4)
+      );
+      const highQualityMobile = coarsePointer && !ultraCompact && !lowPowerTouch && !reducedMotion && (
+        (deviceMemory >= 6 && cpuCores >= 6) ||
+        (deviceMemory >= 8) ||
+        (cpuCores >= 8)
+      );
+      const reducedEffects = reducedMotion || (coarsePointer && (shortEdge < 360 || lowPowerTouch));
+      const renderBudget = coarsePointer
+        ? (highQualityMobile ? 3600000 : (ultraCompact || lowPowerTouch ? 1850000 : 2450000))
+        : 5600000;
       const adaptiveCap = Math.sqrt(renderBudget / viewportArea);
-      const pixelRatioCap = this.clamp(adaptiveCap, 1.15, coarsePointer ? (ultraCompact ? 1.45 : 1.75) : 3);
+      const maxTouchRatio = ultraCompact ? 1.45 : (highQualityMobile ? 2.05 : 1.75);
+      const pixelRatioCap = this.clamp(adaptiveCap, 1.15, coarsePointer ? maxTouchRatio : 3);
+      const baseGlow = coarsePointer ? (ultraCompact || lowPowerTouch ? 0.52 : 0.74) : 1;
+      const glowStrength = highQualityMobile ? Math.min(1, baseGlow + 0.18) : baseGlow;
+      const backdropGlowAlpha = highQualityMobile
+        ? 0.9
+        : (coarsePointer ? (ultraCompact || lowPowerTouch ? 0.52 : 0.72) : 1);
+      const ambientParticleCount = coarsePointer
+        ? (highQualityMobile ? 8 : (ultraCompact || lowPowerTouch ? 2 : 4))
+        : 14;
 
       return {
         isTouch: coarsePointer,
         isPhone: ultraCompact,
+        highQualityMobile,
         reducedEffects,
-        dynamicFocusMask: !coarsePointer || !reducedEffects,
-        glowStrength: coarsePointer ? (ultraCompact ? 0.54 : 0.72) : 1,
-        backdropGlowAlpha: coarsePointer ? (ultraCompact ? 0.56 : 0.72) : 1,
+        dynamicFocusMask: !reducedEffects || highQualityMobile,
+        glowStrength,
+        backdropGlowAlpha,
         pixelRatioCap,
         maxDelta: coarsePointer ? 0.16 : 0.1,
-        slideDurationScale: coarsePointer ? (ultraCompact ? 0.86 : 0.92) : 0.98,
-        ambientParticleCount: coarsePointer ? (ultraCompact ? 2 : 4) : 14,
+        slideDurationScale: coarsePointer ? ((ultraCompact || lowPowerTouch) ? 0.86 : 0.92) : 0.98,
+        ambientParticleCount,
       };
     }
 
