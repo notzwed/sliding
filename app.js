@@ -371,12 +371,15 @@
         return false;
       }
       if (sha !== seen) {
-        showAppUpdateButton("Update Ready", true);
         await requestServiceWorkerUpdate();
         if (swRegistration?.waiting) {
           handleUpdateReady();
+          return true;
         }
-        return true;
+        if (!appUpdateReady) {
+          hideAppUpdateButton();
+        }
+        return false;
       }
       if (!appUpdateReady) {
         hideAppUpdateButton();

@@ -140,11 +140,7 @@
       this.winOverlayTime = 0;
       this.loseOverlayTime = 0;
       this.phase = "playing";
-      this.runtimePerformanceTier = 0;
-      this.frameBudgetWindow = [];
-      this.frameBudgetTimer = 0;
       this.resizeRafId = 0;
-      this.lastProfileSignature = "";
 
       this.resizeCanvas();
       this.bindEvents();
@@ -380,8 +376,9 @@
       const stage = this.canvas.parentElement;
       const width = stage.clientWidth;
       const height = stage.clientHeight;
-      this.applyPerformanceProfileTuning(width, height);
+      this.performanceProfile = this.computePerformanceProfile(width, height);
       const nextPixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, this.performanceProfile.pixelRatioCap));
+      document.body.classList.toggle("hq-mobile", Boolean(this.performanceProfile.highQualityMobile));
       const sizeUnchanged = Math.abs(width - this.lastCanvasWidth) < 1 && Math.abs(height - this.lastCanvasHeight) < 1;
       const ratioUnchanged = Math.abs(nextPixelRatio - this.lastCanvasPixelRatio) < 0.01;
       if (sizeUnchanged && ratioUnchanged && this.levelData) {
@@ -416,7 +413,6 @@
       const delta = Math.min((timestamp - this.lastTimestamp) / 1000 || 0, this.performanceProfile.maxDelta);
       this.lastTimestamp = timestamp;
       this.lastDelta = delta || this.lastDelta;
-      this.sampleRuntimePerformance(delta);
 
       this.update(delta);
       this.draw();
@@ -5150,76 +5146,6 @@
         this.resizeRafId = 0;
         this.resizeCanvas();
       });
-    }
-
-    sampleRuntimePerformance(delta) {
-      if (!this.performanceProfile?.isTouch) {
-        return;
-      }
-
-      const safeDelta = this.clamp(delta || 0, 0.001, 0.25);
-      if (safeDelta > 0.12) {
-        return;
-      }
-
-      this.frameBudgetWindow.push(safeDelta);
-      if (this.frameBudgetWindow.length > 120) {
-        this.frameBudgetWindow.shift();
-      }
-      this.frameBudgetTimer += safeDelta;
-      if (this.frameBudgetTimer < 0.9 || this.frameBudgetWindow.length < 24) {
-        return;
-      }
-
-      const avgDelta = this.frameBudgetWindow.reduce((sum, value) => sum + value, 0) / this.frameBudgetWindow.length;
-      const fps = 1 / Math.max(avgDelta, 0.001);
-      this.frameBudgetTimer = 0;
-      this.frameBudgetWindow.length = 0;
-
-      let nextTier = this.runtimePerformanceTier;
-      if (fps < 50) {
-        nextTier = Math.min(3, nextTier + 1);
-      } else if (fps > 57.5) {
-        nextTier = Math.max(0, nextTier - 1);
-      }
-
-      if (nextTier !== this.runtimePerformanceTier) {
-        this.runtimePerformanceTier = nextTier;
-        this.applyPerformanceProfileTuning(this.lastCanvasWidth || window.innerWidth, this.lastCanvasHeight || window.innerHeight);
-        this.scheduleResize();
-      }
-    }
-
-    applyPerformanceProfileTuning(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
-      const profile = this.computePerformanceProfile(viewportWidth, viewportHeight);
-      if (profile.isTouch && this.runtimePerformanceTier > 0) {
-        const tier = this.runtimePerformanceTier;
-        profile.pixelRatioCap = Math.max(1.05, profile.pixelRatioCap - tier * 0.18);
-        profile.ambientParticleCount = Math.max(0, profile.ambientParticleCount - tier * 2);
-        profile.glowStrength = Math.max(0.34, profile.glowStrength - tier * 0.14);
-        profile.backdropGlowAlpha = Math.max(0.35, profile.backdropGlowAlpha - tier * 0.16);
-        profile.reducedEffects = profile.reducedEffects || tier >= 2;
-        profile.dynamicFocusMask = !profile.reducedEffects;
-      }
-      if (profile.isTouch) {
-        profile.maxDelta = Math.min(profile.maxDelta, 0.12);
-      }
-
-      const signature = [
-        profile.ambientParticleCount,
-        profile.glowStrength.toFixed(3),
-        profile.backdropGlowAlpha.toFixed(3),
-        profile.reducedEffects ? "1" : "0"
-      ].join("|");
-      const profileChanged = signature !== this.lastProfileSignature;
-      this.performanceProfile = profile;
-      this.lastProfileSignature = signature;
-      document.body.classList.toggle("hq-mobile", Boolean(profile.highQualityMobile && this.runtimePerformanceTier === 0));
-      document.body.classList.toggle("runtime-lowfx", Boolean(this.runtimePerformanceTier >= 2));
-
-      if (profileChanged && this.levelData) {
-        this.ambientField = this.buildAmbientField(this.levelData.seed);
-      }
     }
 
     computePerformanceProfile(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {

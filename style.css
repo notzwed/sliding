@@ -1825,27 +1825,6 @@ body.update-prompt-active .app-update-btn {
   }
 }
 
-body.runtime-lowfx::after,
-body.runtime-lowfx .hud::after,
-body.runtime-lowfx .footer-bar::after,
-body.runtime-lowfx .game-stage::after {
-  animation: none !important;
-}
-
-body.runtime-lowfx::after {
-  opacity: 0.08;
-  filter: blur(10px);
-}
-
-body.runtime-lowfx .hud::after,
-body.runtime-lowfx .footer-bar::after {
-  opacity: 0.34;
-}
-
-body.runtime-lowfx .game-stage::after {
-  opacity: 0.22;
-}
-
 @media (max-width: 900px), (pointer: coarse) {
   .app-shell {
     gap: 8px;
