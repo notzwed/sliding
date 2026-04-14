@@ -1805,24 +1805,6 @@ body.update-prompt-active .app-update-btn {
     background: rgba(0, 0, 0, 0.46);
   }
 
-  body.hq-mobile .hud,
-  body.hq-mobile .footer-bar,
-  body.hq-mobile .message-panel {
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-  }
-
-  body.hq-mobile .hud::after,
-  body.hq-mobile .footer-bar::after {
-    animation: panelSweep 10s linear infinite;
-    opacity: 0.58;
-  }
-
-  body.hq-mobile::after {
-    animation: driftGlow 18s linear infinite;
-    opacity: 0.14;
-    filter: blur(20px);
-  }
 }
 
 @media (max-width: 900px), (pointer: coarse) {

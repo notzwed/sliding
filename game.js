@@ -378,12 +378,6 @@
       const height = stage.clientHeight;
       this.performanceProfile = this.computePerformanceProfile(width, height);
       const nextPixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, this.performanceProfile.pixelRatioCap));
-      // Keep mobile lighting profile stable: avoid runtime toggling between low/high glow states.
-      if (this.performanceProfile.isTouch) {
-        document.body.classList.remove("hq-mobile");
-      } else {
-        document.body.classList.toggle("hq-mobile", Boolean(this.performanceProfile.highQualityMobile));
-      }
       const sizeUnchanged = Math.abs(width - this.lastCanvasWidth) < 1 && Math.abs(height - this.lastCanvasHeight) < 1;
       const ratioUnchanged = Math.abs(nextPixelRatio - this.lastCanvasPixelRatio) < 0.01;
       if (sizeUnchanged && ratioUnchanged && this.levelData) {
