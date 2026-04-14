@@ -394,7 +394,7 @@
       this.ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
       this.ctx.imageSmoothingEnabled = true;
       if ("imageSmoothingQuality" in this.ctx) {
-        this.ctx.imageSmoothingQuality = this.performanceProfile.highQualityMobile ? "high" : "medium";
+        this.ctx.imageSmoothingQuality = this.performanceProfile.isTouch ? "medium" : "high";
       }
       this.lastCanvasWidth = width;
       this.lastCanvasHeight = height;
@@ -5173,10 +5173,10 @@
       );
       const reducedEffects = reducedMotion || (coarsePointer && (shortEdge < 360 || lowPowerTouch));
       const renderBudget = coarsePointer
-        ? (highQualityMobile ? 3600000 : (ultraCompact || lowPowerTouch ? 1850000 : 2450000))
+        ? (highQualityMobile ? 3000000 : (ultraCompact || lowPowerTouch ? 1700000 : 2200000))
         : 5600000;
       const adaptiveCap = Math.sqrt(renderBudget / viewportArea);
-      const maxTouchRatio = ultraCompact ? 1.45 : (highQualityMobile ? 2.05 : 1.75);
+      const maxTouchRatio = ultraCompact ? 1.35 : (highQualityMobile ? 1.8 : 1.6);
       const pixelRatioCap = this.clamp(adaptiveCap, 1.15, coarsePointer ? maxTouchRatio : 3);
       const baseGlow = coarsePointer ? (ultraCompact || lowPowerTouch ? 0.52 : 0.74) : 1;
       const glowStrength = highQualityMobile ? Math.min(1, baseGlow + 0.18) : baseGlow;
@@ -5184,7 +5184,7 @@
         ? 0.9
         : (coarsePointer ? (ultraCompact || lowPowerTouch ? 0.52 : 0.72) : 1);
       const ambientParticleCount = coarsePointer
-        ? (highQualityMobile ? 8 : (ultraCompact || lowPowerTouch ? 2 : 4))
+        ? (highQualityMobile ? 5 : (ultraCompact || lowPowerTouch ? 1 : 3))
         : 14;
 
       return {

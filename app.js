@@ -29,6 +29,9 @@
   const CHAOS_ROUNDS_TO_WIN = 2;
   const CHAOS_TOTAL_ROUNDS = 3;
   const CHAOS_CONTROL_DEVICE = "_chaos_control";
+  const CHAOS_LOOP_INTERVAL_MS = 260;
+  const CHAOS_PRESENCE_PUSH_MS = 1500;
+  const CHAOS_SNAPSHOT_PUSH_MS = 320;
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
@@ -131,6 +134,9 @@
   let chaosLoopTimer = null;
   let chaosLoopBusy = false;
   let chaosLastPresencePushAt = 0;
+  let chaosLastSnapshotPushAt = 0;
+  let chaosLastSnapshotKey = "";
+  let chaosLaunchedRoundKey = "";
   let chaosState = null;
   let chaosPlayerMeta = {
     mapVote: "",
@@ -1152,6 +1158,9 @@
     challengeResultShown = false;
     chaosHost = false;
     chaosLastPresencePushAt = 0;
+    chaosLastSnapshotPushAt = 0;
+    chaosLastSnapshotKey = "";
+    chaosLaunchedRoundKey = "";
     chaosState = null;
     chaosPlayerMeta = {
       mapVote: "",
@@ -1881,6 +1890,8 @@
     const seed = Number.isFinite(control.seed) ? (control.seed >>> 0) : createChaosRoundSeed(challengeRoom, round, control.mapChoice || "medium", control.modifierChoice || "none");
     const modifier = typeof control.modifierChoice === "string" ? control.modifierChoice : "none";
     const timeLimitSec = modifier === "time_limit" ? Math.max(14, Math.round(level * 0.9 + 9)) : 0;
+    hideChallengeMenu();
+    hideStartMenu();
     withGame((game) => {
       game.clearGhostState?.();
       game.startChallengeRun(level, {
@@ -1894,6 +1905,29 @@
         }
       });
     });
+  };
+
+  const buildChaosRoundKey = (control) => {
+    const round = Math.max(1, readNumber(control?.round, 1));
+    const seed = Number.isFinite(control?.seed) ? (control.seed >>> 0) : createChaosRoundSeed(
+      challengeRoom || "",
+      round,
+      control?.mapChoice || "medium",
+      control?.modifierChoice || "none"
+    );
+    return `${round}:${seed}:${String(control?.modifierChoice || "none")}`;
+  };
+
+  const ensureChaosRoundRunning = (control) => {
+    if (!control || !challengeRoom) {
+      return;
+    }
+    const roundKey = buildChaosRoundKey(control);
+    if (chaosLaunchedRoundKey === roundKey) {
+      return;
+    }
+    chaosLaunchedRoundKey = roundKey;
+    launchChaosRound(control);
   };
 
   const hostAdvanceChaosState = async (room, control, players) => {
@@ -1984,7 +2018,7 @@
           return;
         }
         const now = Date.now();
-        if (now - chaosLastPresencePushAt >= 1200) {
+        if (now - chaosLastPresencePushAt >= CHAOS_PRESENCE_PUSH_MS) {
           chaosLastPresencePushAt = now;
           await upsertChaosPlayerState(room, window.__slideyGame?.getChallengeSnapshot?.() || null, {
             stage: chaosPlayerMeta.stage,
@@ -2003,8 +2037,10 @@
           chaosPlayerMeta.modifierVote = typeof local.modifierVote === "string" ? local.modifierVote : "";
           chaosPlayerMeta.round = readNumber(local.round, chaosPlayerMeta.round);
         }
-        updateChallengeModeUi();
-        updateChaosStatus(control, players);
+        if (!challengeMenu?.classList.contains("hidden")) {
+          updateChallengeModeUi();
+          updateChaosStatus(control, players);
+        }
         if (chaosHost) {
           await hostAdvanceChaosState(room, control, players);
         }
@@ -2015,7 +2051,7 @@
             if (chaosHost) {
               await upsertChaosControl(room, { ...control, stage: "playing" });
             }
-            launchChaosRound(control);
+            ensureChaosRoundRunning(control);
             chaosPlayerMeta.stage = "playing";
             chaosPlayerMeta.round = readNumber(control.round, 1);
             chaosPlayerMeta.result = "playing";
@@ -2024,6 +2060,7 @@
         }
 
         if (control.stage === "playing") {
+          ensureChaosRoundRunning(control);
           const snapshot = window.__slideyGame?.getChallengeSnapshot?.();
           if (snapshot) {
             if (snapshot.phase === "won" || snapshot.phase === "lost") {
@@ -2034,12 +2071,27 @@
             }
             chaosPlayerMeta.stage = "playing";
             chaosPlayerMeta.round = readNumber(control.round, 1);
-            await upsertChaosPlayerState(room, snapshot, {
-              stage: "playing",
-              round: chaosPlayerMeta.round,
-              result: chaosPlayerMeta.result,
-              runMs: chaosPlayerMeta.runMs
-            });
+            const pushKey = [
+              readNumber(snapshot.x, 0),
+              readNumber(snapshot.y, 0),
+              String(snapshot.phase || "playing"),
+              readNumber(snapshot.runTimeMs, 0)
+            ].join(":");
+            const hasTerminalState = snapshot.phase === "won" || snapshot.phase === "lost";
+            const shouldPushSnapshot =
+              hasTerminalState ||
+              pushKey !== chaosLastSnapshotKey ||
+              (now - chaosLastSnapshotPushAt >= CHAOS_SNAPSHOT_PUSH_MS);
+            if (shouldPushSnapshot) {
+              chaosLastSnapshotPushAt = now;
+              chaosLastSnapshotKey = pushKey;
+              await upsertChaosPlayerState(room, snapshot, {
+                stage: "playing",
+                round: chaosPlayerMeta.round,
+                result: chaosPlayerMeta.result,
+                runMs: chaosPlayerMeta.runMs
+              });
+            }
           }
           const ghosts = players
             .filter((player) => player.deviceId !== deviceId && readNumber(player.round, 1) === readNumber(control.round, 1))
@@ -2053,6 +2105,9 @@
             }));
           window.__slideyGame?.setGhostStates?.(ghosts);
         } else {
+          if (control.stage === "vote_map" || control.stage === "vote_modifier" || control.stage === "lobby") {
+            chaosLaunchedRoundKey = "";
+          }
           window.__slideyGame?.clearGhostState?.();
         }
 
@@ -2067,7 +2122,7 @@
       } finally {
         chaosLoopBusy = false;
       }
-    }, 180);
+    }, CHAOS_LOOP_INTERVAL_MS);
   };
 
   const beginChallengeSync = (room) => {
