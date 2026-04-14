@@ -455,6 +455,9 @@
         : (challenge
           ? this.buildLevelFromSeed(this.level, this.challengeSeed || 1)
           : (daily ? this.buildLevelFromSeed(this.level, dailySeed || 1) : this.buildLevel(this.level)));
+      if (challenge && this.challengeModifier === "no_orbs") {
+        this.levelData.orbCells = new Map();
+      }
       this.player = {
         x: this.levelData.start.x,
         y: this.levelData.start.y,
@@ -1959,7 +1962,7 @@
         this.collapseFreezeRemaining -= consumed;
         return;
       }
-      const collapseSpeed = this.isChallengeRun && this.challengeModifier === "collapse_fast" ? 1.55 : 1;
+      const collapseSpeed = this.isChallengeRun && this.challengeModifier === "collapse_fast" ? 2.15 : 1;
       this.levelTime += delta * collapseSpeed;
     }
 

@@ -73,6 +73,8 @@
   const challengeLastValue = document.getElementById("challengeLastValue");
   const challengeResultDetail = document.getElementById("challengeResultDetail");
   const challengeResultCloseBtn = document.getElementById("challengeResultCloseBtn");
+  const chaosTransitionOverlay = document.getElementById("chaosTransitionOverlay");
+  const chaosTransitionText = document.getElementById("chaosTransitionText");
   const dailyMenu = document.getElementById("dailyMenu");
   const dailyDateLabel = document.getElementById("dailyDateLabel");
   const dailyStatusText = document.getElementById("dailyStatusText");
@@ -728,6 +730,23 @@
     challengeResultScreen.setAttribute("aria-hidden", "true");
   };
 
+  const hideChaosTransitionOverlay = () => {
+    if (!chaosTransitionOverlay) {
+      return;
+    }
+    chaosTransitionOverlay.classList.add("hidden");
+    chaosTransitionOverlay.setAttribute("aria-hidden", "true");
+  };
+
+  const showChaosTransitionOverlay = (text) => {
+    if (!chaosTransitionOverlay || !chaosTransitionText) {
+      return;
+    }
+    chaosTransitionText.textContent = text;
+    chaosTransitionOverlay.classList.remove("hidden");
+    chaosTransitionOverlay.setAttribute("aria-hidden", "false");
+  };
+
   const showChallengeResultScreen = (firstLabel, lastLabel, detailText) => {
     if (!challengeResultScreen) {
       return;
@@ -1116,6 +1135,7 @@
     clearChallengeCountdown();
     clearChaosLoop();
     hideChallengeResultScreen();
+    hideChaosTransitionOverlay();
     if (challengePushTimer) {
       window.clearInterval(challengePushTimer);
       challengePushTimer = null;
@@ -1859,6 +1879,23 @@
     setChallengeStatus("Chaos syncing...");
   };
 
+  const updateChaosTransitionOverlay = (control, now = Date.now()) => {
+    if (!control || control.stage !== "countdown") {
+      hideChaosTransitionOverlay();
+      return;
+    }
+    const startAt = readNumber(control.startAtMs, 0);
+    if (startAt <= 0) {
+      hideChaosTransitionOverlay();
+      return;
+    }
+    const remaining = Math.max(0, Math.ceil((startAt - now) / 1000));
+    const round = Math.max(1, readNumber(control.round, 1));
+    const isFirstRound = round <= 1;
+    const label = isFirstRound ? "Game starts in" : "Next game in";
+    showChaosTransitionOverlay(`${label} ${remaining}...`);
+  };
+
   const resolveChaosFinal = (control, players) => {
     const wins = control?.wins && typeof control.wins === "object" ? control.wins : {};
     const standings = players
@@ -1893,7 +1930,7 @@
     const level = Math.max(1, readNumber(control.level, getChaosLevelForMap(control.mapChoice || "medium")));
     const seed = Number.isFinite(control.seed) ? (control.seed >>> 0) : createChaosRoundSeed(challengeRoom, round, control.mapChoice || "medium", control.modifierChoice || "none");
     const modifier = typeof control.modifierChoice === "string" ? control.modifierChoice : "none";
-    const timeLimitSec = modifier === "time_limit" ? Math.max(14, Math.round(level * 0.9 + 9)) : 0;
+    const timeLimitSec = modifier === "time_limit" ? 25 : 0;
     hideChallengeMenu();
     hideStartMenu();
     withGame((game) => {
@@ -1972,7 +2009,7 @@
           stage: "countdown",
           modifierChoice,
           seed,
-          startAtMs: now + 5500
+          startAtMs: now + 5000
         };
         await upsertChaosControl(room, next);
       }
@@ -2054,6 +2091,7 @@
           chaosPlayerMeta.round = readNumber(local.round, chaosPlayerMeta.round);
         }
         const gameplayPhase = control.stage === "countdown" || control.stage === "playing" || control.stage === "finished";
+        updateChaosTransitionOverlay(control, now);
         if (gameplayPhase) {
           hideChallengeMenu();
           hideStartMenu();

@@ -1476,6 +1476,34 @@ body.update-prompt-active .app-update-btn {
   50% { transform: rotate(12deg) scale(0.94, 1.1); }
 }
 
+.chaos-transition-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 34;
+  display: grid;
+  place-items: center;
+  padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.chaos-transition-overlay.hidden {
+  display: none;
+}
+
+.chaos-transition-text {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.96);
+  text-transform: uppercase;
+  font-family: var(--font-display);
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+  font-size: clamp(1.2rem, 4.6vw, 2rem);
+}
+
 @keyframes splashFadeIn {
   0% {
     opacity: 0;
