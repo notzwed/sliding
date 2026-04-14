@@ -218,9 +218,28 @@
   <div id="challengeMenu" class="challenge-menu hidden" aria-hidden="true">
     <h2 class="challenge-title">CHALLENGE</h2>
     <p class="challenge-subtitle">Share a 5-char code: same map, same start, transparent rival ghost.</p>
+    <div class="challenge-mode-switch" role="tablist" aria-label="Challenge mode">
+      <button id="challengeModeClassicBtn" class="challenge-mode-btn is-active" type="button" data-mode="classic" aria-selected="true">Classic</button>
+      <button id="challengeModeChaosBtn" class="challenge-mode-btn" type="button" data-mode="chaos" aria-selected="false">Chaos</button>
+    </div>
+    <p id="challengeModeHint" class="challenge-mode-hint">Classic: 1v1 speed race on the same seeded map.</p>
     <div class="challenge-actions">
       <button id="createChallengeBtn" class="challenge-action challenge-action-primary" type="button">Create Code</button>
       <button id="joinChallengeBtn" class="challenge-action" type="button">Join Code</button>
+    </div>
+    <button id="chaosStartBtn" class="challenge-action challenge-action-primary hidden" type="button">Start Chaos</button>
+    <div id="chaosVotePanel" class="chaos-vote-panel hidden" aria-hidden="true">
+      <p id="chaosVoteTitle" class="chaos-vote-title">Vote</p>
+      <div id="chaosMapVoteGroup" class="chaos-vote-group hidden">
+        <button class="chaos-vote-option" type="button" data-vote-type="map" data-vote-value="small">Small</button>
+        <button class="chaos-vote-option" type="button" data-vote-type="map" data-vote-value="medium">Medium</button>
+        <button class="chaos-vote-option" type="button" data-vote-type="map" data-vote-value="large">Large</button>
+      </div>
+      <div id="chaosModVoteGroup" class="chaos-vote-group hidden">
+        <button class="chaos-vote-option" type="button" data-vote-type="modifier" data-vote-value="no_orbs">No Orbs</button>
+        <button class="chaos-vote-option" type="button" data-vote-type="modifier" data-vote-value="collapse_fast">Fast Collapse</button>
+        <button class="chaos-vote-option" type="button" data-vote-type="modifier" data-vote-value="time_limit">Time Limit</button>
+      </div>
     </div>
     <div id="challengeJoinPanel" class="challenge-join-panel hidden" aria-hidden="true">
       <label for="challengeCodeInput" class="challenge-code-label">Enter Code</label>

@@ -24,6 +24,11 @@
   const DAILY_LEADERBOARD_LIMIT = 10;
   const GLOBAL_LEADERBOARD_LIMIT = 50;
   const ACTIVE_LEADERBOARD_WINDOW_MS = 2 * 60 * 60 * 1000;
+  const CHAOS_MIN_LEVEL = 15;
+  const CHAOS_MAX_PLAYERS = 4;
+  const CHAOS_ROUNDS_TO_WIN = 2;
+  const CHAOS_TOTAL_ROUNDS = 3;
+  const CHAOS_CONTROL_DEVICE = "_chaos_control";
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
@@ -50,6 +55,15 @@
   const challengeJoinConfirmBtn = document.getElementById("challengeJoinConfirmBtn");
   const challengeJoinCancelBtn = document.getElementById("challengeJoinCancelBtn");
   const challengeStatusText = document.getElementById("challengeStatusText");
+  const challengeModeClassicBtn = document.getElementById("challengeModeClassicBtn");
+  const challengeModeChaosBtn = document.getElementById("challengeModeChaosBtn");
+  const challengeModeHint = document.getElementById("challengeModeHint");
+  const chaosStartBtn = document.getElementById("chaosStartBtn");
+  const chaosVotePanel = document.getElementById("chaosVotePanel");
+  const chaosVoteTitle = document.getElementById("chaosVoteTitle");
+  const chaosMapVoteGroup = document.getElementById("chaosMapVoteGroup");
+  const chaosModVoteGroup = document.getElementById("chaosModVoteGroup");
+  const chaosVoteOptionButtons = Array.from(document.querySelectorAll(".chaos-vote-option"));
   const challengeResultScreen = document.getElementById("challengeResultScreen");
   const challengeFirstValue = document.getElementById("challengeFirstValue");
   const challengeLastValue = document.getElementById("challengeLastValue");
@@ -112,6 +126,20 @@
   let challengeLocalResult = null;
   let challengeOpponentResult = null;
   let challengeResultShown = false;
+  let challengeMode = "classic";
+  let chaosHost = false;
+  let chaosLoopTimer = null;
+  let chaosLoopBusy = false;
+  let chaosLastPresencePushAt = 0;
+  let chaosState = null;
+  let chaosPlayerMeta = {
+    mapVote: "",
+    modifierVote: "",
+    stage: "lobby",
+    round: 1,
+    result: "playing",
+    runMs: 0
+  };
   let dailyInfo = null;
   let dailyLeaderboard = [];
   let dailyTopReplay = null;
@@ -607,6 +635,69 @@
     challengeMenu.classList.remove("hidden");
     challengeMenu.setAttribute("aria-hidden", "false");
     closeChallengeJoinPanel();
+    updateChallengeModeUi();
+  };
+
+  const updateChallengeModeUi = () => {
+    const chaosUnlocked = highestLevel >= CHAOS_MIN_LEVEL;
+    if (challengeMode === "chaos" && !chaosUnlocked) {
+      challengeMode = "classic";
+    }
+    const classicActive = challengeMode === "classic";
+    challengeModeClassicBtn?.classList.toggle("is-active", classicActive);
+    challengeModeClassicBtn?.setAttribute("aria-selected", classicActive ? "true" : "false");
+    challengeModeChaosBtn?.classList.toggle("is-active", !classicActive);
+    challengeModeChaosBtn?.setAttribute("aria-selected", classicActive ? "false" : "true");
+    if (challengeModeChaosBtn) {
+      challengeModeChaosBtn.disabled = !chaosUnlocked;
+    }
+    if (challengeModeHint) {
+      challengeModeHint.textContent = classicActive
+        ? "Classic: 1v1 speed race on the same seeded map."
+        : (chaosUnlocked
+          ? "Chaos: up to 4 players, votes + best-of-3. Unlock at level 15."
+          : "Chaos unlocks at level 15.");
+    }
+    if (chaosVotePanel) {
+      const visible = challengeMode === "chaos";
+      chaosVotePanel.classList.toggle("hidden", !visible);
+      chaosVotePanel.setAttribute("aria-hidden", visible ? "false" : "true");
+    }
+    if (chaosStartBtn) {
+      const showStart = challengeMode === "chaos" && chaosHost && (!chaosState || chaosState.stage === "lobby");
+      chaosStartBtn.classList.toggle("hidden", !showStart);
+    }
+  };
+
+  const setChallengeMode = (mode) => {
+    if (mode !== "classic" && mode !== "chaos") {
+      return;
+    }
+    if (mode === "chaos" && highestLevel < CHAOS_MIN_LEVEL) {
+      setChallengeStatus(`Chaos unlocks at level ${CHAOS_MIN_LEVEL}.`);
+      return;
+    }
+    challengeMode = mode;
+    updateChallengeModeUi();
+    if (mode === "chaos") {
+      setChallengeStatus("Chaos mode ready. Create a code or join one.");
+    } else {
+      setChallengeStatus("Create or enter a 5-character challenge code.");
+    }
+  };
+
+  const setChaosVoteUi = (stage, currentVote = "") => {
+    const mapStage = stage === "vote_map";
+    const modStage = stage === "vote_modifier";
+    chaosMapVoteGroup?.classList.toggle("hidden", !mapStage);
+    chaosModVoteGroup?.classList.toggle("hidden", !modStage);
+    if (chaosVoteTitle) {
+      chaosVoteTitle.textContent = mapStage ? "Vote Map Size" : (modStage ? "Vote Modifier" : "Chaos");
+    }
+    for (const button of chaosVoteOptionButtons) {
+      const value = button.dataset.voteValue || "";
+      button.classList.toggle("is-selected", value === currentVote);
+    }
   };
 
   const setChallengeStatus = (text) => {
@@ -1013,6 +1104,7 @@
 
   const stopChallengeSync = () => {
     clearChallengeCountdown();
+    clearChaosLoop();
     hideChallengeResultScreen();
     if (challengePushTimer) {
       window.clearInterval(challengePushTimer);
@@ -1028,6 +1120,7 @@
     }
     if (supabaseClient && challengeRoom) {
       const room = challengeRoom;
+      const wasChaosHost = chaosHost;
       challengeRoom = "";
       void supabaseClient
         .from(CHALLENGE_TABLE)
@@ -1038,12 +1131,34 @@
         })
         .catch(() => {
         });
-      return;
+      if (wasChaosHost) {
+        void supabaseClient
+          .from(CHALLENGE_TABLE)
+          .delete()
+          .eq("challenge_code", room)
+          .eq("device_id", CHAOS_CONTROL_DEVICE)
+          .then(() => {
+          })
+          .catch(() => {
+          });
+      }
     }
     challengeRoom = "";
     challengeLocalResult = null;
     challengeOpponentResult = null;
     challengeResultShown = false;
+    chaosHost = false;
+    chaosLastPresencePushAt = 0;
+    chaosState = null;
+    chaosPlayerMeta = {
+      mapVote: "",
+      modifierVote: "",
+      stage: "lobby",
+      round: 1,
+      result: "playing",
+      runMs: 0
+    };
+    updateChallengeModeUi();
   };
 
   const randomCodeChunk = (size) => {
@@ -1370,6 +1485,177 @@
     };
   };
 
+  const createChaosRoundSeed = (room, round, mapChoice, modifierChoice) =>
+    hashStringToSeed(`${room}|${round}|${mapChoice}|${modifierChoice}`);
+
+  const getChaosLevelForMap = (mapChoice) => {
+    if (mapChoice === "small") {
+      return 8;
+    }
+    if (mapChoice === "large") {
+      return 22;
+    }
+    return 14;
+  };
+
+  const createChaosControl = (room, hostId) => ({
+    mode: "chaos",
+    stage: "lobby",
+    hostId,
+    round: 1,
+    totalRounds: CHAOS_TOTAL_ROUNDS,
+    wins: {},
+    mapChoice: "",
+    modifierChoice: "",
+    level: 14,
+    seed: createChaosRoundSeed(room, 1, "medium", "none"),
+    startAtMs: 0,
+    voteDeadlineMs: 0,
+    updatedAtMs: Date.now()
+  });
+
+  const encodeChaosControl = (state) => `chaos_ctrl:${JSON.stringify(state)}`;
+  const decodeChaosControl = (token) => {
+    if (typeof token !== "string" || !token.startsWith("chaos_ctrl:")) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(token.slice("chaos_ctrl:".length));
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  const encodeChaosPlayer = (state) => `chaos_p:${JSON.stringify(state)}`;
+  const decodeChaosPlayer = (token) => {
+    if (typeof token !== "string" || !token.startsWith("chaos_p:")) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(token.slice("chaos_p:".length));
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  const chaosPlayerPayload = (override = {}) => ({
+    stage: chaosPlayerMeta.stage || "lobby",
+    round: readNumber(chaosPlayerMeta.round, 1),
+    mapVote: chaosPlayerMeta.mapVote || "",
+    modifierVote: chaosPlayerMeta.modifierVote || "",
+    result: chaosPlayerMeta.result || "playing",
+    runMs: readNumber(chaosPlayerMeta.runMs, 0),
+    ...override,
+    updatedAtMs: Date.now()
+  });
+
+  const upsertChaosControl = async (room, controlState) => {
+    if (!supabaseClient) {
+      return;
+    }
+    const payload = {
+      challenge_code: room,
+      device_id: CHAOS_CONTROL_DEVICE,
+      level: Math.max(1, readNumber(controlState.level, 14)),
+      pos_x: 0,
+      pos_y: 0,
+      render_x: 0,
+      render_y: 0,
+      shape: "square",
+      phase: encodeChaosControl({ ...controlState, updatedAtMs: Date.now() }),
+      updated_at: new Date().toISOString()
+    };
+    await supabaseClient.from(CHALLENGE_TABLE).upsert(payload, { onConflict: "challenge_code,device_id" });
+  };
+
+  const upsertChaosPlayerState = async (room, snapshot, override = {}) => {
+    if (!supabaseClient) {
+      return;
+    }
+    const payload = {
+      challenge_code: room,
+      device_id: deviceId,
+      level: readNumber(snapshot?.level, chaosState?.level || highestLevel),
+      pos_x: Number.isFinite(snapshot?.x) ? snapshot.x : 0,
+      pos_y: Number.isFinite(snapshot?.y) ? snapshot.y : 0,
+      render_x: Number.isFinite(snapshot?.renderX) ? snapshot.renderX : 0,
+      render_y: Number.isFinite(snapshot?.renderY) ? snapshot.renderY : 0,
+      shape: typeof snapshot?.shape === "string" ? snapshot.shape : selectedShape,
+      phase: encodeChaosPlayer(chaosPlayerPayload(override)),
+      updated_at: new Date().toISOString()
+    };
+    await supabaseClient.from(CHALLENGE_TABLE).upsert(payload, { onConflict: "challenge_code,device_id" });
+  };
+
+  const readChaosRows = async (room) => {
+    if (!supabaseClient || !room) {
+      return { control: null, players: [] };
+    }
+    const { data, error } = await supabaseClient
+      .from(CHALLENGE_TABLE)
+      .select("device_id,level,pos_x,pos_y,render_x,render_y,shape,phase,updated_at")
+      .eq("challenge_code", room)
+      .order("updated_at", { ascending: false })
+      .limit(32);
+    if (error || !Array.isArray(data)) {
+      return { control: null, players: [] };
+    }
+    let control = null;
+    const players = [];
+    const now = Date.now();
+    for (const row of data) {
+      if (row.device_id === CHAOS_CONTROL_DEVICE) {
+        control = decodeChaosControl(row.phase || "");
+        continue;
+      }
+      const player = decodeChaosPlayer(row.phase || "");
+      if (!player) {
+        continue;
+      }
+      const updatedAt = Date.parse(row.updated_at || "");
+      if (Number.isFinite(updatedAt) && now - updatedAt > 8000) {
+        continue;
+      }
+      players.push({
+        deviceId: row.device_id,
+        level: readNumber(row.level, 1),
+        x: Number(row.pos_x),
+        y: Number(row.pos_y),
+        renderX: Number(row.render_x),
+        renderY: Number(row.render_y),
+        shape: row.shape,
+        updatedAt,
+        ...player
+      });
+    }
+    return { control, players };
+  };
+
+  const pickVoteWinner = (players, key, fallback) => {
+    const counts = new Map();
+    for (const player of players) {
+      const vote = typeof player[key] === "string" ? player[key] : "";
+      if (!vote) {
+        continue;
+      }
+      counts.set(vote, (counts.get(vote) || 0) + 1);
+    }
+    if (!counts.size) {
+      return fallback;
+    }
+    let bestVote = fallback;
+    let bestCount = -1;
+    for (const [vote, count] of counts.entries()) {
+      if (count > bestCount) {
+        bestVote = vote;
+        bestCount = count;
+      }
+    }
+    return bestVote;
+  };
+
   const publishChallengeLobby = async (info) => {
     if (!supabaseClient) {
       return;
@@ -1509,6 +1795,278 @@
     }, 9000);
   };
 
+  const clearChaosLoop = () => {
+    if (chaosLoopTimer) {
+      window.clearInterval(chaosLoopTimer);
+      chaosLoopTimer = null;
+    }
+    chaosLoopBusy = false;
+  };
+
+  const updateChaosStatus = (control, players) => {
+    const count = players.length;
+    if (!control) {
+      setChallengeStatus("Chaos unavailable: control state missing.");
+      return;
+    }
+    if (control.stage === "lobby") {
+      setChaosVoteUi("lobby");
+      setChallengeStatus(`Chaos lobby: ${count}/${CHAOS_MAX_PLAYERS} players. Waiting for host.`);
+      return;
+    }
+    if (control.stage === "vote_map") {
+      const remaining = Math.max(0, Math.ceil((readNumber(control.voteDeadlineMs, Date.now()) - Date.now()) / 1000));
+      setChaosVoteUi("vote_map", chaosPlayerMeta.mapVote || "");
+      setChallengeStatus(`Vote map size (${remaining}s). Players: ${count}/${CHAOS_MAX_PLAYERS}.`);
+      return;
+    }
+    if (control.stage === "vote_modifier") {
+      const remaining = Math.max(0, Math.ceil((readNumber(control.voteDeadlineMs, Date.now()) - Date.now()) / 1000));
+      setChaosVoteUi("vote_modifier", chaosPlayerMeta.modifierVote || "");
+      setChallengeStatus(`Vote challenge modifier (${remaining}s).`);
+      return;
+    }
+    if (control.stage === "countdown") {
+      const remaining = Math.max(0, Math.ceil((readNumber(control.startAtMs, Date.now()) - Date.now()) / 1000));
+      setChaosVoteUi("countdown");
+      setChallengeStatus(`Chaos round ${control.round}/${control.totalRounds} starts in ${remaining}s.`);
+      return;
+    }
+    if (control.stage === "playing") {
+      setChaosVoteUi("playing");
+      setChallengeStatus(`Chaos round ${control.round}/${control.totalRounds} live - ${String(control.modifierChoice || "none").replace("_", " ")}.`);
+      return;
+    }
+    if (control.stage === "finished") {
+      setChaosVoteUi("finished");
+      setChallengeStatus("Chaos match finished.");
+    }
+  };
+
+  const resolveChaosFinal = (control, players) => {
+    const wins = control?.wins && typeof control.wins === "object" ? control.wins : {};
+    const standings = players
+      .map((player) => ({
+        deviceId: player.deviceId,
+        wins: readNumber(wins[player.deviceId], 0)
+      }))
+      .sort((a, b) => b.wins - a.wins);
+    if (!standings.length) {
+      showChallengeResultScreen("NO WINNER", "-", "No valid players found.");
+      return;
+    }
+    const firstId = standings[0].deviceId;
+    const lastId = standings[standings.length - 1].deviceId;
+    const first = firstId === deviceId ? "YOU" : `P-${firstId.slice(-4).toUpperCase()}`;
+    const last = lastId === deviceId ? "YOU" : `P-${lastId.slice(-4).toUpperCase()}`;
+    const detail = standings
+      .map((entry, index) => {
+        const name = entry.deviceId === deviceId ? "You" : `P-${entry.deviceId.slice(-4).toUpperCase()}`;
+        return `#${index + 1} ${name} (${entry.wins}W)`;
+      })
+      .join(" | ");
+    showChallengeResultScreen(first, last, detail);
+  };
+
+  const launchChaosRound = (control) => {
+    if (!control) {
+      return;
+    }
+    const round = Math.max(1, readNumber(control.round, 1));
+    const totalRounds = Math.max(1, readNumber(control.totalRounds, CHAOS_TOTAL_ROUNDS));
+    const level = Math.max(1, readNumber(control.level, getChaosLevelForMap(control.mapChoice || "medium")));
+    const seed = Number.isFinite(control.seed) ? (control.seed >>> 0) : createChaosRoundSeed(challengeRoom, round, control.mapChoice || "medium", control.modifierChoice || "none");
+    const modifier = typeof control.modifierChoice === "string" ? control.modifierChoice : "none";
+    const timeLimitSec = modifier === "time_limit" ? Math.max(14, Math.round(level * 0.9 + 9)) : 0;
+    withGame((game) => {
+      game.clearGhostState?.();
+      game.startChallengeRun(level, {
+        seed,
+        code: challengeRoom,
+        chaos: {
+          modifier,
+          round,
+          totalRounds,
+          timeLimitSec
+        }
+      });
+    });
+  };
+
+  const hostAdvanceChaosState = async (room, control, players) => {
+    if (!chaosHost || !control || !room) {
+      return;
+    }
+    const now = Date.now();
+    if (control.stage === "vote_map") {
+      const eligible = players.filter((player) => readNumber(player.round, 1) === readNumber(control.round, 1));
+      const allVoted = eligible.length > 0 && eligible.every((player) => typeof player.mapVote === "string" && player.mapVote.length > 0);
+      if (allVoted || now >= readNumber(control.voteDeadlineMs, now + 1)) {
+        const mapChoice = pickVoteWinner(eligible, "mapVote", "medium");
+        const next = {
+          ...control,
+          stage: "vote_modifier",
+          mapChoice,
+          level: getChaosLevelForMap(mapChoice),
+          voteDeadlineMs: now + 14000
+        };
+        await upsertChaosControl(room, next);
+      }
+      return;
+    }
+    if (control.stage === "vote_modifier") {
+      const eligible = players.filter((player) => readNumber(player.round, 1) === readNumber(control.round, 1));
+      const allVoted = eligible.length > 0 && eligible.every((player) => typeof player.modifierVote === "string" && player.modifierVote.length > 0);
+      if (allVoted || now >= readNumber(control.voteDeadlineMs, now + 1)) {
+        const modifierChoice = pickVoteWinner(eligible, "modifierVote", "none");
+        const round = Math.max(1, readNumber(control.round, 1));
+        const seed = createChaosRoundSeed(room, round, control.mapChoice || "medium", modifierChoice);
+        const next = {
+          ...control,
+          stage: "countdown",
+          modifierChoice,
+          seed,
+          startAtMs: now + 5500
+        };
+        await upsertChaosControl(room, next);
+      }
+      return;
+    }
+    if (control.stage !== "playing") {
+      return;
+    }
+    const round = Math.max(1, readNumber(control.round, 1));
+    const roundPlayers = players.filter((player) => readNumber(player.round, 1) === round);
+    const finished = roundPlayers.filter((player) => player.result === "won" || player.result === "lost");
+    if (!finished.length || finished.length < roundPlayers.length) {
+      return;
+    }
+    const winners = roundPlayers
+      .filter((player) => player.result === "won")
+      .sort((a, b) => readNumber(a.runMs, 0) - readNumber(b.runMs, 0));
+    const wins = { ...(control.wins || {}) };
+    if (winners.length) {
+      const winnerId = winners[0].deviceId;
+      wins[winnerId] = readNumber(wins[winnerId], 0) + 1;
+    }
+    const topWins = Object.values(wins).reduce((best, value) => Math.max(best, readNumber(value, 0)), 0);
+    const roundDone = round >= CHAOS_TOTAL_ROUNDS || topWins >= CHAOS_ROUNDS_TO_WIN;
+    if (roundDone) {
+      await upsertChaosControl(room, { ...control, stage: "finished", wins });
+      return;
+    }
+    await upsertChaosControl(room, {
+      ...control,
+      stage: "countdown",
+      round: round + 1,
+      wins,
+      seed: createChaosRoundSeed(room, round + 1, control.mapChoice || "medium", control.modifierChoice || "none"),
+      startAtMs: now + 5000
+    });
+  };
+
+  const runChaosLoop = (room) => {
+    clearChaosLoop();
+    chaosLoopTimer = window.setInterval(async () => {
+      if (!challengeRoom || challengeMode !== "chaos") {
+        return;
+      }
+      if (chaosLoopBusy) {
+        return;
+      }
+      chaosLoopBusy = true;
+      try {
+        const { control, players } = await readChaosRows(room);
+        if (!control) {
+          return;
+        }
+        const now = Date.now();
+        if (now - chaosLastPresencePushAt >= 1200) {
+          chaosLastPresencePushAt = now;
+          await upsertChaosPlayerState(room, window.__slideyGame?.getChallengeSnapshot?.() || null, {
+            stage: chaosPlayerMeta.stage,
+            round: chaosPlayerMeta.round,
+            mapVote: chaosPlayerMeta.mapVote,
+            modifierVote: chaosPlayerMeta.modifierVote,
+            result: chaosPlayerMeta.result,
+            runMs: chaosPlayerMeta.runMs
+          });
+        }
+        chaosState = control;
+        chaosPlayerMeta.stage = typeof control.stage === "string" ? control.stage : chaosPlayerMeta.stage;
+        const local = players.find((player) => player.deviceId === deviceId) || null;
+        if (local) {
+          chaosPlayerMeta.mapVote = typeof local.mapVote === "string" ? local.mapVote : "";
+          chaosPlayerMeta.modifierVote = typeof local.modifierVote === "string" ? local.modifierVote : "";
+          chaosPlayerMeta.round = readNumber(local.round, chaosPlayerMeta.round);
+        }
+        updateChallengeModeUi();
+        updateChaosStatus(control, players);
+        if (chaosHost) {
+          await hostAdvanceChaosState(room, control, players);
+        }
+
+        if (control.stage === "countdown") {
+          const startAt = readNumber(control.startAtMs, 0);
+          if (startAt > 0 && Date.now() >= startAt) {
+            if (chaosHost) {
+              await upsertChaosControl(room, { ...control, stage: "playing" });
+            }
+            launchChaosRound(control);
+            chaosPlayerMeta.stage = "playing";
+            chaosPlayerMeta.round = readNumber(control.round, 1);
+            chaosPlayerMeta.result = "playing";
+            chaosPlayerMeta.runMs = 0;
+          }
+        }
+
+        if (control.stage === "playing") {
+          const snapshot = window.__slideyGame?.getChallengeSnapshot?.();
+          if (snapshot) {
+            if (snapshot.phase === "won" || snapshot.phase === "lost") {
+              chaosPlayerMeta.result = snapshot.phase;
+              chaosPlayerMeta.runMs = readNumber(snapshot.runTimeMs, 0);
+            } else {
+              chaosPlayerMeta.result = "playing";
+            }
+            chaosPlayerMeta.stage = "playing";
+            chaosPlayerMeta.round = readNumber(control.round, 1);
+            await upsertChaosPlayerState(room, snapshot, {
+              stage: "playing",
+              round: chaosPlayerMeta.round,
+              result: chaosPlayerMeta.result,
+              runMs: chaosPlayerMeta.runMs
+            });
+          }
+          const ghosts = players
+            .filter((player) => player.deviceId !== deviceId && readNumber(player.round, 1) === readNumber(control.round, 1))
+            .slice(0, 3)
+            .map((player) => ({
+              x: Number(player.x),
+              y: Number(player.y),
+              renderX: Number(player.renderX),
+              renderY: Number(player.renderY),
+              shape: player.shape
+            }));
+          window.__slideyGame?.setGhostStates?.(ghosts);
+        } else {
+          window.__slideyGame?.clearGhostState?.();
+        }
+
+        if (control.stage === "finished") {
+          clearChaosLoop();
+          resolveChaosFinal(control, players);
+          setChallengeStatus("Chaos finished.");
+          challengeResultAutoCloseTimer = window.setTimeout(() => {
+            closeChallengeAfterResult();
+          }, 9000);
+        }
+      } finally {
+        chaosLoopBusy = false;
+      }
+    }, 180);
+  };
+
   const beginChallengeSync = (room) => {
     challengeRoom = room;
     challengeLocalResult = null;
@@ -1631,13 +2189,26 @@
   };
 
   const launchChallenge = (info) => {
-    stopChallengeSync();
-    hideChallengeResultScreen();
+    if (challengeMode === "chaos") {
+      clearChallengeCountdown();
+      clearChaosLoop();
+      hideChallengeResultScreen();
+    } else {
+      stopChallengeSync();
+      hideChallengeResultScreen();
+    }
     hideShopMenu();
     showChallengeMenu();
     hideStartMenu();
     if (challengeCodeValue) {
       challengeCodeValue.textContent = info.code;
+    }
+    if (challengeMode === "chaos") {
+      challengeRoom = info.room;
+      setChallengeStatus("Chaos lobby connected.");
+      runChaosLoop(info.room);
+      updateChallengeModeUi();
+      return;
     }
     setChallengeStatus("Challenge countdown started.");
 
@@ -1703,7 +2274,112 @@
     }
   };
 
+  const createChaosLobby = async () => {
+    if (highestLevel < CHAOS_MIN_LEVEL) {
+      setChallengeStatus(`Chaos unlocks at level ${CHAOS_MIN_LEVEL}.`);
+      return;
+    }
+    if (!supabaseClient) {
+      setChallengeStatus("Chaos requires online sync.");
+      return;
+    }
+    stopChallengeSync();
+    closeChallengeJoinPanel({ clear: true });
+    const info = buildChallengeInfo();
+    if (challengeCodeValue) {
+      challengeCodeValue.textContent = info.code;
+    }
+    if (challengeCodeInput) {
+      challengeCodeInput.value = info.code;
+      challengeCodeInput.select();
+    }
+    copyChallengeBtn?.classList.remove("hidden");
+    chaosHost = true;
+    chaosPlayerMeta = {
+      mapVote: "",
+      modifierVote: "",
+      stage: "lobby",
+      round: 1,
+      result: "playing",
+      runMs: 0
+    };
+    const control = createChaosControl(info.room, deviceId);
+    await upsertChaosControl(info.room, control);
+    await upsertChaosPlayerState(info.room, null, {
+      stage: "lobby",
+      round: 1,
+      result: "playing",
+      runMs: 0,
+      mapVote: "",
+      modifierVote: ""
+    });
+    setChallengeStatus("Chaos code created. Share it with up to 3 players.");
+    launchChallenge(info);
+  };
+
+  const joinChaosLobby = async () => {
+    if (highestLevel < CHAOS_MIN_LEVEL) {
+      setChallengeStatus(`Chaos unlocks at level ${CHAOS_MIN_LEVEL}.`);
+      return;
+    }
+    if (!supabaseClient) {
+      setChallengeStatus("Chaos requires online sync.");
+      return;
+    }
+    stopChallengeSync();
+    const raw = challengeCodeInput?.value || "";
+    const parsed = parseChallengeCode(raw);
+    if (!parsed) {
+      setChallengeStatus("Invalid code. Use exactly 5 characters.");
+      challengeCodeInput?.focus();
+      challengeCodeInput?.select();
+      return;
+    }
+    const { control, players } = await readChaosRows(parsed.room);
+    if (!control || control.mode !== "chaos") {
+      setChallengeStatus("Chaos lobby not found for this code.");
+      return;
+    }
+    const uniquePlayers = new Set(players.map((player) => player.deviceId));
+    if (!uniquePlayers.has(deviceId) && uniquePlayers.size >= CHAOS_MAX_PLAYERS) {
+      setChallengeStatus("Chaos lobby full (max 4 players).");
+      return;
+    }
+    chaosHost = control.hostId === deviceId;
+    chaosPlayerMeta = {
+      mapVote: "",
+      modifierVote: "",
+      stage: "lobby",
+      round: 1,
+      result: "playing",
+      runMs: 0
+    };
+    await upsertChaosPlayerState(parsed.room, null, {
+      stage: "lobby",
+      round: 1,
+      result: "playing",
+      runMs: 0
+    });
+    if (challengeCodeValue) {
+      challengeCodeValue.textContent = parsed.code;
+    }
+    copyChallengeBtn?.classList.remove("hidden");
+    setChallengeStatus("Chaos lobby joined. Waiting for host to start.");
+    closeChallengeJoinPanel({ clear: true });
+    launchChallenge({
+      code: parsed.code,
+      room: parsed.room,
+      level: getChaosLevelForMap(control.mapChoice || "medium"),
+      seed: readNumber(control.seed, 0),
+      startAtMs: Date.now() + 12000
+    });
+  };
+
   const createChallenge = () => {
+    if (challengeMode === "chaos") {
+      void createChaosLobby();
+      return;
+    }
     closeChallengeJoinPanel({ clear: true });
     const info = buildChallengeInfo();
     if (challengeCodeValue) {
@@ -1727,6 +2403,10 @@
   };
 
   const joinChallenge = async () => {
+    if (challengeMode === "chaos") {
+      await joinChaosLobby();
+      return;
+    }
     const raw = challengeCodeInput?.value || "";
     if (!raw) {
       setChallengeStatus("Enter a 5-character challenge code.");
@@ -1746,7 +2426,7 @@
     if (supabaseClient) {
       const lobby = await resolveChallengeLobby(parsed.room);
       if (!lobby) {
-      setChallengeStatus("Host lobby not found for this 5-character code.");
+        setChallengeStatus("Host lobby not found for this 5-character code.");
         return;
       }
       level = lobby.level;
@@ -1773,6 +2453,57 @@
     setChallengeStatus("Challenge accepted. Get ready for the start.");
     closeChallengeJoinPanel({ clear: true });
     launchChallenge(info);
+  };
+
+  const startChaosMatch = async () => {
+    if (!supabaseClient || !challengeRoom || !chaosHost) {
+      return;
+    }
+    const { control, players } = await readChaosRows(challengeRoom);
+    if (!control || control.mode !== "chaos") {
+      setChallengeStatus("Chaos control not found.");
+      return;
+    }
+    if (players.length < 2) {
+      setChallengeStatus("Need at least 2 players to start Chaos.");
+      return;
+    }
+    const next = {
+      ...control,
+      stage: "vote_map",
+      round: 1,
+      totalRounds: CHAOS_TOTAL_ROUNDS,
+      wins: {},
+      mapChoice: "",
+      modifierChoice: "",
+      voteDeadlineMs: Date.now() + 14000
+    };
+    await upsertChaosControl(challengeRoom, next);
+    setChallengeStatus("Chaos started. Vote map size now.");
+  };
+
+  const submitChaosVote = async (voteType, voteValue) => {
+    if (!supabaseClient || !challengeRoom || challengeMode !== "chaos") {
+      return;
+    }
+    if (voteType === "map") {
+      chaosPlayerMeta.mapVote = voteValue;
+      setChaosVoteUi("vote_map", voteValue);
+    } else if (voteType === "modifier") {
+      chaosPlayerMeta.modifierVote = voteValue;
+      setChaosVoteUi("vote_modifier", voteValue);
+    } else {
+      return;
+    }
+    await upsertChaosPlayerState(challengeRoom, window.__slideyGame?.getChallengeSnapshot?.() || null, {
+      stage: chaosPlayerMeta.stage,
+      round: chaosPlayerMeta.round,
+      mapVote: chaosPlayerMeta.mapVote,
+      modifierVote: chaosPlayerMeta.modifierVote,
+      result: chaosPlayerMeta.result,
+      runMs: chaosPlayerMeta.runMs
+    });
+    setChallengeStatus("Vote sent.");
   };
 
   const copyChallengeCode = async () => {
@@ -1830,6 +2561,7 @@
     updateMenuOrbsDisplay();
     updateShapeButtons();
     syncDailyAccessUi();
+    updateChallengeModeUi();
   };
 
   const setButtonLabel = () => {
@@ -2274,6 +3006,8 @@
     closeChallengeJoinPanel();
     copyChallengeBtn?.classList.add("hidden");
     setChallengeStatus("Create or enter a 5-character challenge code.");
+    setChallengeMode("classic");
+    updateChallengeModeUi();
     hideChallengeResultScreen();
     updateBestTimeDisplay(readNumber(window.localStorage.getItem(BEST_TIME_KEY), 0));
     updateMenuOrbsDisplay();
@@ -2302,6 +3036,12 @@
   startRunBtn?.addEventListener("click", startNormalRun);
   dailyRunBtn?.addEventListener("click", showDailyMenu);
   challengeBtn?.addEventListener("click", showChallengeMenu);
+  challengeModeClassicBtn?.addEventListener("click", () => {
+    setChallengeMode("classic");
+  });
+  challengeModeChaosBtn?.addEventListener("click", () => {
+    setChallengeMode("chaos");
+  });
   tutorialBtn?.addEventListener("click", startTutorialRun);
   storeBtn?.addEventListener("click", showShopMenu);
   closeShopBtn?.addEventListener("click", hideShopMenu);
@@ -2313,6 +3053,16 @@
   challengeJoinCancelBtn?.addEventListener("click", () => {
     closeChallengeJoinPanel({ clear: true });
   });
+  chaosStartBtn?.addEventListener("click", () => {
+    void startChaosMatch();
+  });
+  for (const button of chaosVoteOptionButtons) {
+    button.addEventListener("click", () => {
+      const voteType = button.dataset.voteType || "";
+      const voteValue = button.dataset.voteValue || "";
+      void submitChaosVote(voteType, voteValue);
+    });
+  }
   copyChallengeBtn?.addEventListener("click", () => {
     void copyChallengeCode();
   });

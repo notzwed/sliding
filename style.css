@@ -1045,7 +1045,7 @@ body.update-prompt-active .app-update-btn {
   inset: 0;
   z-index: 32;
   display: grid;
-  grid-template-rows: auto auto auto auto auto auto;
+  grid-template-rows: repeat(10, auto);
   gap: 14px;
   justify-items: center;
   align-content: center;
@@ -1080,6 +1080,45 @@ body.update-prompt-active .app-update-btn {
   display: grid;
   gap: 10px;
   width: min(86vw, 360px);
+}
+
+.challenge-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: min(86vw, 360px);
+}
+
+.challenge-mode-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(8, 8, 8, 0.72);
+  color: rgba(255, 255, 255, 0.78);
+  min-height: 40px;
+  padding: 8px 12px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.challenge-mode-btn.is-active {
+  border-color: rgba(255, 255, 255, 0.8);
+  background: rgba(12, 12, 12, 0.92);
+  color: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.12);
+}
+
+.challenge-mode-hint {
+  margin: -2px 0 0;
+  color: rgba(255, 255, 255, 0.68);
+  text-align: center;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  max-width: min(92vw, 560px);
+  min-height: 1.2em;
 }
 
 .challenge-action,
@@ -1129,6 +1168,61 @@ body.update-prompt-active .app-update-btn {
 
 .challenge-join-panel.hidden {
   display: none;
+}
+
+.chaos-vote-panel {
+  display: grid;
+  gap: 10px;
+  width: min(90vw, 420px);
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 16px;
+  background: rgba(8, 8, 8, 0.64);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+
+.chaos-vote-panel.hidden {
+  display: none;
+}
+
+.chaos-vote-title {
+  margin: 0;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.8);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.chaos-vote-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.chaos-vote-group.hidden {
+  display: none;
+}
+
+.chaos-vote-option {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  min-height: 40px;
+  padding: 8px 10px;
+  background: rgba(10, 10, 10, 0.9);
+  color: rgba(255, 255, 255, 0.88);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.chaos-vote-option.is-selected {
+  border-color: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.12);
 }
 
 .challenge-join-actions {
@@ -1729,6 +1823,27 @@ body.update-prompt-active .app-update-btn {
     opacity: 0.14;
     filter: blur(20px);
   }
+}
+
+body.runtime-lowfx::after,
+body.runtime-lowfx .hud::after,
+body.runtime-lowfx .footer-bar::after,
+body.runtime-lowfx .game-stage::after {
+  animation: none !important;
+}
+
+body.runtime-lowfx::after {
+  opacity: 0.08;
+  filter: blur(10px);
+}
+
+body.runtime-lowfx .hud::after,
+body.runtime-lowfx .footer-bar::after {
+  opacity: 0.34;
+}
+
+body.runtime-lowfx .game-stage::after {
+  opacity: 0.22;
 }
 
 @media (max-width: 900px), (pointer: coarse) {

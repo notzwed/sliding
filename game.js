@@ -46,7 +46,7 @@
   class NeonCollapseMaze {
     constructor() {
       this.canvas = document.getElementById("gameCanvas");
-      this.ctx = this.canvas.getContext("2d", { alpha: false, desynchronized: false });
+      this.ctx = this.canvas.getContext("2d", { alpha: false, desynchronized: true });
       this.levelValue = document.getElementById("levelValue");
       this.orbValue = document.getElementById("orbValue");
       this.timerValue = document.getElementById("timerValue");
@@ -88,6 +88,7 @@
       this.pointerStart = null;
       this.activePointerId = null;
       this.pendingDirection = null;
+      this.bufferedDirection = null;
       this.lastMoveDirection = { dx: 0, dy: -1 };
       this.triangleSpinTime = 0;
       this.isMenuDemo = false;
@@ -100,6 +101,12 @@
       this.tutorialStage = 0;
       this.tutorialFlow = null;
       this.ghostState = null;
+      this.ghostStates = [];
+      this.challengeVariant = "classic";
+      this.challengeModifier = "none";
+      this.challengeRound = 1;
+      this.challengeTotalRounds = 1;
+      this.challengeTimeLimitSec = 0;
       this.dailyReplayTrack = [];
       this.dailyReplayGhost = null;
       this.tutorialStep = 0;
@@ -133,6 +140,11 @@
       this.winOverlayTime = 0;
       this.loseOverlayTime = 0;
       this.phase = "playing";
+      this.runtimePerformanceTier = 0;
+      this.frameBudgetWindow = [];
+      this.frameBudgetTimer = 0;
+      this.resizeRafId = 0;
+      this.lastProfileSignature = "";
 
       this.resizeCanvas();
       this.bindEvents();
@@ -202,7 +214,17 @@
     startChallengeRun(level = this.unlockedLevel, challenge = {}) {
       const seed = Number.isFinite(challenge.seed) ? (challenge.seed >>> 0) : ((Date.now() ^ Math.floor(Math.random() * 2147483647)) >>> 0);
       const code = typeof challenge.code === "string" ? challenge.code : "";
-      this.startLevel(level, { challenge: true, challengeSeed: seed, challengeCode: code });
+      const chaos = challenge.chaos && typeof challenge.chaos === "object" ? challenge.chaos : null;
+      this.startLevel(level, {
+        challenge: true,
+        challengeSeed: seed,
+        challengeCode: code,
+        challengeVariant: chaos ? "chaos" : "classic",
+        challengeModifier: chaos?.modifier || "none",
+        challengeRound: Number.isFinite(chaos?.round) ? Math.max(1, Math.floor(chaos.round)) : 1,
+        challengeTotalRounds: Number.isFinite(chaos?.totalRounds) ? Math.max(1, Math.floor(chaos.totalRounds)) : 1,
+        challengeTimeLimitSec: Number.isFinite(chaos?.timeLimitSec) ? Math.max(0, chaos.timeLimitSec) : 0
+      });
     }
 
     startDailyRun(level = 1, daily = {}) {
@@ -216,12 +238,13 @@
     }
 
     bindEvents() {
-      window.addEventListener("resize", () => this.resizeCanvas());
+      window.addEventListener("resize", () => this.scheduleResize());
       if (window.visualViewport) {
-        window.visualViewport.addEventListener("resize", () => this.resizeCanvas());
+        window.visualViewport.addEventListener("resize", () => this.scheduleResize());
       }
 
       this.canvas.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
         if (this.isTutorialDialogBlockingInput()) {
           return;
         }
@@ -229,13 +252,36 @@
         if (this.canvas.setPointerCapture) {
           this.canvas.setPointerCapture(event.pointerId);
         }
-        this.pointerStart = { x: event.clientX, y: event.clientY };
-      });
+        this.pointerStart = { x: event.clientX, y: event.clientY, consumed: false };
+      }, { passive: false });
+
+      this.canvas.addEventListener("pointermove", (event) => {
+        if (this.activePointerId !== null && event.pointerId !== this.activePointerId) {
+          return;
+        }
+        if (!this.pointerStart || this.pointerStart.consumed || this.phase !== "playing") {
+          return;
+        }
+        const dx = event.clientX - this.pointerStart.x;
+        const dy = event.clientY - this.pointerStart.y;
+        const threshold = this.getSwipeThreshold();
+        if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) {
+          return;
+        }
+        event.preventDefault();
+        this.pointerStart.consumed = true;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          this.queueMove(Math.sign(dx), 0);
+        } else {
+          this.queueMove(0, Math.sign(dy));
+        }
+      }, { passive: false });
 
       this.canvas.addEventListener("pointerup", (event) => {
         if (this.activePointerId !== null && event.pointerId !== this.activePointerId) {
           return;
         }
+        event.preventDefault();
 
         if (this.phase !== "playing") {
           this.handleInterludeInput();
@@ -250,7 +296,12 @@
 
         const dx = event.clientX - this.pointerStart.x;
         const dy = event.clientY - this.pointerStart.y;
+        const consumed = Boolean(this.pointerStart.consumed);
         this.pointerStart = null;
+        if (consumed) {
+          this.clearPointerState(event.pointerId);
+          return;
+        }
 
         const threshold = this.getSwipeThreshold();
         this.clearPointerState(event.pointerId);
@@ -263,11 +314,12 @@
         } else {
           this.queueMove(0, Math.sign(dy));
         }
-      });
+      }, { passive: false });
 
       this.canvas.addEventListener("pointercancel", (event) => {
+        event.preventDefault();
         this.clearPointerState(event.pointerId);
-      });
+      }, { passive: false });
 
       this.canvas.addEventListener("pointerleave", (event) => {
         if (event.pointerType !== "mouse") {
@@ -328,9 +380,8 @@
       const stage = this.canvas.parentElement;
       const width = stage.clientWidth;
       const height = stage.clientHeight;
-      this.performanceProfile = this.computePerformanceProfile(width, height);
+      this.applyPerformanceProfileTuning(width, height);
       const nextPixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, this.performanceProfile.pixelRatioCap));
-      document.body.classList.toggle("hq-mobile", Boolean(this.performanceProfile.highQualityMobile));
       const sizeUnchanged = Math.abs(width - this.lastCanvasWidth) < 1 && Math.abs(height - this.lastCanvasHeight) < 1;
       const ratioUnchanged = Math.abs(nextPixelRatio - this.lastCanvasPixelRatio) < 0.01;
       if (sizeUnchanged && ratioUnchanged && this.levelData) {
@@ -365,6 +416,7 @@
       const delta = Math.min((timestamp - this.lastTimestamp) / 1000 || 0, this.performanceProfile.maxDelta);
       this.lastTimestamp = timestamp;
       this.lastDelta = delta || this.lastDelta;
+      this.sampleRuntimePerformance(delta);
 
       this.update(delta);
       this.draw();
@@ -379,6 +431,11 @@
       const tutorialStage = Number.isFinite(options.tutorialStage) ? Math.max(0, Math.floor(options.tutorialStage)) : 0;
       const challengeSeed = Number.isFinite(options.challengeSeed) ? (options.challengeSeed >>> 0) : 0;
       const challengeCode = typeof options.challengeCode === "string" ? options.challengeCode : "";
+      const challengeVariant = typeof options.challengeVariant === "string" ? options.challengeVariant : "classic";
+      const challengeModifier = typeof options.challengeModifier === "string" ? options.challengeModifier : "none";
+      const challengeRound = Number.isFinite(options.challengeRound) ? Math.max(1, Math.floor(options.challengeRound)) : 1;
+      const challengeTotalRounds = Number.isFinite(options.challengeTotalRounds) ? Math.max(1, Math.floor(options.challengeTotalRounds)) : 1;
+      const challengeTimeLimitSec = Number.isFinite(options.challengeTimeLimitSec) ? Math.max(0, options.challengeTimeLimitSec) : 0;
       const dailySeed = Number.isFinite(options.dailySeed) ? (options.dailySeed >>> 0) : 0;
       const dailyDateKey = typeof options.dailyDateKey === "string" ? options.dailyDateKey : "";
       this.phase = "playing";
@@ -389,6 +446,11 @@
       this.dailyDateKey = daily ? dailyDateKey : "";
       this.challengeSeed = challenge ? challengeSeed : 0;
       this.challengeCode = challenge ? challengeCode : "";
+      this.challengeVariant = challenge ? (challengeVariant === "chaos" ? "chaos" : "classic") : "classic";
+      this.challengeModifier = challenge ? challengeModifier : "none";
+      this.challengeRound = challenge ? challengeRound : 1;
+      this.challengeTotalRounds = challenge ? challengeTotalRounds : 1;
+      this.challengeTimeLimitSec = challenge ? challengeTimeLimitSec : 0;
       this.tutorialStage = tutorial ? tutorialStage : 0;
       this.isMenuDemo = menuDemo;
       this.tutorialStep = 0;
@@ -416,6 +478,7 @@
       this.dailyReplayTrack = [{ t: 0, x: this.player.x, y: this.player.y }];
       this.moveState = null;
       this.pendingDirection = null;
+      this.bufferedDirection = null;
       this.levelTime = 0;
       this.levelOrbCount = 0;
       this.introFocusTime = BASE_CONFIG.introFocusDuration;
@@ -440,6 +503,7 @@
       }
       if (!challenge) {
         this.ghostState = null;
+        this.ghostStates = [];
       }
       this.ambientField = this.buildAmbientField(this.levelData.seed);
       this.hideMessage();
@@ -467,10 +531,11 @@
             "Daily run active."
           );
         } else if (challenge) {
-          this.setStatusText(
-            "Challenge mode attiva: stessa mappa per entrambi, effetti indipendenti.",
-            "Challenge attiva."
-          );
+          const modLabel = this.challengeModifier === "no_orbs"
+            ? "No Orbs"
+            : (this.challengeModifier === "collapse_fast" ? "Fast Collapse" : (this.challengeModifier === "time_limit" ? "Time Limit" : "Standard"));
+          const variantLabel = this.challengeVariant === "chaos" ? "Chaos" : "Challenge";
+          this.setStatusText(`${variantLabel} R${this.challengeRound}/${this.challengeTotalRounds} - ${modLabel}`, `${variantLabel} active.`);
         } else {
           this.setStatusText("", "");
         }
@@ -1899,7 +1964,8 @@
         this.collapseFreezeRemaining -= consumed;
         return;
       }
-      this.levelTime += delta;
+      const collapseSpeed = this.isChallengeRun && this.challengeModifier === "collapse_fast" ? 1.55 : 1;
+      this.levelTime += delta * collapseSpeed;
     }
 
     tickOrbEffects(delta) {
@@ -2042,6 +2108,11 @@
       this.updateCamera();
       this.updateDailyReplayGhost();
 
+      if (this.isChallengeRun && this.challengeModifier === "time_limit" && this.challengeTimeLimitSec > 0 && this.runClockTime >= this.challengeTimeLimitSec) {
+        this.beginLoseSequence();
+        return;
+      }
+
       if (this.isCollapsed(this.player.x, this.player.y)) {
         this.beginLoseSequence();
         return;
@@ -2166,6 +2237,9 @@
 
     queueMove(dx, dy, force = false) {
       if (!force && (window.__neonInstallLock || this.isMenuDemo || this.phase !== "playing" || this.moveState || this.pendingDirection)) {
+        if (!force && this.phase === "playing" && !window.__neonInstallLock && !this.isMenuDemo) {
+          this.bufferedDirection = { dx, dy };
+        }
         return;
       }
       if (!force && this.isTutorialDialogBlockingInput()) {
@@ -2562,6 +2636,9 @@
     }
 
     collectOrbIfNeeded(x = this.player.x, y = this.player.y) {
+      if (this.isChallengeRun && this.challengeModifier === "no_orbs") {
+        return;
+      }
       const key = `${x},${y}`;
       const orb = this.levelData.orbCells.get(key);
       if (!orb || orb.collected) {
@@ -2692,10 +2769,12 @@
           }
           this.triggerImpact(this.player.x, this.player.y, this.moveState.dx, this.moveState.dy, 0.85);
           this.moveState = null;
+          this.promoteBufferedMove();
         }
         return;
       }
 
+      this.promoteBufferedMove();
       if (!this.pendingDirection) {
         this.player.renderX = this.player.x;
         this.player.renderY = this.player.y;
@@ -2715,6 +2794,7 @@
       this.phase = "exiting";
       this.moveState = null;
       this.pendingDirection = null;
+      this.bufferedDirection = null;
       this.impactEffect = null;
       this.exitEffect = {
         time: 0,
@@ -2761,6 +2841,7 @@
       this.phase = "dying";
       this.moveState = null;
       this.pendingDirection = null;
+      this.bufferedDirection = null;
       this.impactEffect = null;
       this.exitEffect = null;
       this.deathEffect = {
@@ -3030,6 +3111,9 @@
     }
 
     countNormalOrbs() {
+      if (this.isChallengeRun && this.challengeModifier === "no_orbs") {
+        return 0;
+      }
       let total = 0;
       for (const orb of this.levelData.orbCells.values()) {
         if ((orb.type || "normal") === "normal") {
@@ -3827,7 +3911,7 @@
     }
 
     drawGhost(ctx) {
-      if (!this.isChallengeRun || !this.ghostState) {
+      if (!this.isChallengeRun) {
         return;
       }
       if (this.phase === "lost" || this.phase === "won") {
@@ -3835,38 +3919,51 @@
       }
 
       const now = Date.now();
-      if (!this.ghostState.updatedAt || now - this.ghostState.updatedAt > 3500) {
+      const states = this.ghostStates.length > 0
+        ? this.ghostStates
+        : (this.ghostState ? [this.ghostState] : []);
+      if (!states.length) {
         return;
       }
 
+      for (let i = 0; i < states.length; i += 1) {
+        this.drawSingleGhost(ctx, states[i], now, i);
+      }
+    }
+
+    drawSingleGhost(ctx, ghost, now, index = 0) {
+      if (!ghost || !ghost.updatedAt || now - ghost.updatedAt > 3500) {
+        return;
+      }
       const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
-      const gx = Number.isFinite(this.ghostState.renderX) ? this.ghostState.renderX : this.ghostState.x;
-      const gy = Number.isFinite(this.ghostState.renderY) ? this.ghostState.renderY : this.ghostState.y;
+      const gx = Number.isFinite(ghost.renderX) ? ghost.renderX : ghost.x;
+      const gy = Number.isFinite(ghost.renderY) ? ghost.renderY : ghost.y;
       if (!Number.isFinite(gx) || !Number.isFinite(gy)) {
         return;
       }
-
       const position = this.toScreen(gx, gy);
       const centerX = position.x + cellSize / 2;
       const centerY = position.y + cellSize / 2;
       const size = cellSize * 0.44;
-      const shape = PLAYER_SHAPES.has(this.ghostState.shape) ? this.ghostState.shape : "square";
-      const width = size;
-      const height = size;
-      const px = centerX - width / 2;
-      const py = centerY - height / 2;
+      const shape = PLAYER_SHAPES.has(ghost.shape) ? ghost.shape : "square";
+      const px = centerX - size / 2;
+      const py = centerY - size / 2;
+      const ageMs = Math.max(0, now - (ghost.updatedAt || now));
+      const fade = this.clamp(1 - ageMs / 4200, 0, 1);
+      const colorShift = index % 3;
+      const color = colorShift === 1
+        ? "rgba(176,255,220,0.88)"
+        : (colorShift === 2 ? "rgba(214,196,255,0.86)" : "rgba(180,230,255,0.9)");
 
       ctx.save();
       ctx.beginPath();
       ctx.rect(frameX, frameY, viewportWidth, viewportHeight);
       ctx.clip();
-      const ageMs = Math.max(0, now - (this.ghostState.updatedAt || now));
-      const fade = this.clamp(1 - ageMs / 4200, 0, 1);
-      ctx.globalAlpha = 0.18 + fade * 0.26;
+      ctx.globalAlpha = 0.16 + fade * 0.24;
       ctx.shadowBlur = 10;
-      ctx.shadowColor = "rgba(180,230,255,0.5)";
-      ctx.fillStyle = "rgba(180,230,255,0.9)";
-      this.drawShapeByType(ctx, shape, px, py, width, height, centerX, centerY);
+      ctx.shadowColor = color;
+      ctx.fillStyle = color;
+      this.drawShapeByType(ctx, shape, px, py, size, size, centerX, centerY);
       ctx.restore();
     }
 
@@ -3961,22 +4058,27 @@
     }
 
     updateGhost(delta) {
-      if (!this.isChallengeRun || !this.ghostState) {
+      if (!this.isChallengeRun) {
         return;
       }
-      const state = this.ghostState;
-      if (!Number.isFinite(state.targetX) || !Number.isFinite(state.targetY)) {
+      const states = this.ghostStates.length > 0 ? this.ghostStates : (this.ghostState ? [this.ghostState] : []);
+      if (!states.length) {
         return;
       }
-      const speed = this.performanceProfile.isTouch ? 17 : 20;
-      const blend = 1 - Math.exp(-speed * Math.max(0, delta));
-      const predictLead = this.performanceProfile.isTouch ? 0.035 : 0.05;
-      const px = state.targetX + (state.velocityX || 0) * predictLead;
-      const py = state.targetY + (state.velocityY || 0) * predictLead;
-      state.renderX += (px - state.renderX) * blend;
-      state.renderY += (py - state.renderY) * blend;
-      state.x = state.targetX;
-      state.y = state.targetY;
+      for (const state of states) {
+        if (!Number.isFinite(state.targetX) || !Number.isFinite(state.targetY)) {
+          continue;
+        }
+        const speed = this.performanceProfile.isTouch ? 17 : 20;
+        const blend = 1 - Math.exp(-speed * Math.max(0, delta));
+        const predictLead = this.performanceProfile.isTouch ? 0.035 : 0.05;
+        const px = state.targetX + (state.velocityX || 0) * predictLead;
+        const py = state.targetY + (state.velocityY || 0) * predictLead;
+        state.renderX += (px - state.renderX) * blend;
+        state.renderY += (py - state.renderY) * blend;
+        state.x = state.targetX;
+        state.y = state.targetY;
+      }
     }
 
     setGhostState(state) {
@@ -4000,6 +4102,7 @@
           updatedAt: now,
           lastTargetAt: now
         };
+        this.ghostStates = [this.ghostState];
         return;
       }
       const prev = this.ghostState;
@@ -4013,10 +4116,60 @@
       prev.shape = state.shape;
       prev.updatedAt = now;
       prev.lastTargetAt = now;
+      this.ghostStates = [prev];
+    }
+
+    setGhostStates(states) {
+      if (!Array.isArray(states) || states.length === 0) {
+        this.ghostStates = [];
+        this.ghostState = null;
+        return;
+      }
+      const next = [];
+      for (let i = 0; i < states.length; i += 1) {
+        const ghost = states[i];
+        if (!ghost || !Number.isFinite(ghost.x) || !Number.isFinite(ghost.y)) {
+          continue;
+        }
+        const prev = this.ghostStates[i];
+        const now = Date.now();
+        const targetX = Number.isFinite(ghost.renderX) ? ghost.renderX : ghost.x;
+        const targetY = Number.isFinite(ghost.renderY) ? ghost.renderY : ghost.y;
+        if (prev) {
+          const dt = Math.max(0.001, (now - (prev.lastTargetAt || now)) / 1000);
+          const vx = (targetX - prev.targetX) / dt;
+          const vy = (targetY - prev.targetY) / dt;
+          prev.targetX = targetX;
+          prev.targetY = targetY;
+          prev.velocityX = this.clamp(vx, -30, 30);
+          prev.velocityY = this.clamp(vy, -30, 30);
+          prev.shape = ghost.shape;
+          prev.updatedAt = now;
+          prev.lastTargetAt = now;
+          next.push(prev);
+        } else {
+          next.push({
+            x: ghost.x,
+            y: ghost.y,
+            targetX,
+            targetY,
+            renderX: targetX,
+            renderY: targetY,
+            velocityX: 0,
+            velocityY: 0,
+            shape: ghost.shape,
+            updatedAt: now,
+            lastTargetAt: now
+          });
+        }
+      }
+      this.ghostStates = next;
+      this.ghostState = next[0] || null;
     }
 
     clearGhostState() {
       this.ghostState = null;
+      this.ghostStates = [];
     }
 
     forceChallengeLoss() {
@@ -4961,9 +5114,17 @@
       const stage = this.canvas.parentElement;
       const shortEdge = Math.min(stage.clientWidth, stage.clientHeight);
       if (this.isCoarsePointer()) {
-        return Math.max(12, shortEdge * 0.024);
+        return Math.max(10, shortEdge * 0.02);
       }
       return Math.max(18, shortEdge * 0.035);
+    }
+
+    promoteBufferedMove() {
+      if (!this.bufferedDirection || this.moveState || this.pendingDirection || this.phase !== "playing") {
+        return;
+      }
+      this.pendingDirection = this.bufferedDirection;
+      this.bufferedDirection = null;
     }
 
     clearPointerState(pointerId) {
@@ -4979,6 +5140,86 @@
 
     isCoarsePointer() {
       return Boolean(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    }
+
+    scheduleResize() {
+      if (this.resizeRafId) {
+        return;
+      }
+      this.resizeRafId = window.requestAnimationFrame(() => {
+        this.resizeRafId = 0;
+        this.resizeCanvas();
+      });
+    }
+
+    sampleRuntimePerformance(delta) {
+      if (!this.performanceProfile?.isTouch) {
+        return;
+      }
+
+      const safeDelta = this.clamp(delta || 0, 0.001, 0.25);
+      if (safeDelta > 0.12) {
+        return;
+      }
+
+      this.frameBudgetWindow.push(safeDelta);
+      if (this.frameBudgetWindow.length > 120) {
+        this.frameBudgetWindow.shift();
+      }
+      this.frameBudgetTimer += safeDelta;
+      if (this.frameBudgetTimer < 0.9 || this.frameBudgetWindow.length < 24) {
+        return;
+      }
+
+      const avgDelta = this.frameBudgetWindow.reduce((sum, value) => sum + value, 0) / this.frameBudgetWindow.length;
+      const fps = 1 / Math.max(avgDelta, 0.001);
+      this.frameBudgetTimer = 0;
+      this.frameBudgetWindow.length = 0;
+
+      let nextTier = this.runtimePerformanceTier;
+      if (fps < 50) {
+        nextTier = Math.min(3, nextTier + 1);
+      } else if (fps > 57.5) {
+        nextTier = Math.max(0, nextTier - 1);
+      }
+
+      if (nextTier !== this.runtimePerformanceTier) {
+        this.runtimePerformanceTier = nextTier;
+        this.applyPerformanceProfileTuning(this.lastCanvasWidth || window.innerWidth, this.lastCanvasHeight || window.innerHeight);
+        this.scheduleResize();
+      }
+    }
+
+    applyPerformanceProfileTuning(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
+      const profile = this.computePerformanceProfile(viewportWidth, viewportHeight);
+      if (profile.isTouch && this.runtimePerformanceTier > 0) {
+        const tier = this.runtimePerformanceTier;
+        profile.pixelRatioCap = Math.max(1.05, profile.pixelRatioCap - tier * 0.18);
+        profile.ambientParticleCount = Math.max(0, profile.ambientParticleCount - tier * 2);
+        profile.glowStrength = Math.max(0.34, profile.glowStrength - tier * 0.14);
+        profile.backdropGlowAlpha = Math.max(0.35, profile.backdropGlowAlpha - tier * 0.16);
+        profile.reducedEffects = profile.reducedEffects || tier >= 2;
+        profile.dynamicFocusMask = !profile.reducedEffects;
+      }
+      if (profile.isTouch) {
+        profile.maxDelta = Math.min(profile.maxDelta, 0.12);
+      }
+
+      const signature = [
+        profile.ambientParticleCount,
+        profile.glowStrength.toFixed(3),
+        profile.backdropGlowAlpha.toFixed(3),
+        profile.reducedEffects ? "1" : "0"
+      ].join("|");
+      const profileChanged = signature !== this.lastProfileSignature;
+      this.performanceProfile = profile;
+      this.lastProfileSignature = signature;
+      document.body.classList.toggle("hq-mobile", Boolean(profile.highQualityMobile && this.runtimePerformanceTier === 0));
+      document.body.classList.toggle("runtime-lowfx", Boolean(this.runtimePerformanceTier >= 2));
+
+      if (profileChanged && this.levelData) {
+        this.ambientField = this.buildAmbientField(this.levelData.seed);
+      }
     }
 
     computePerformanceProfile(viewportWidth = window.innerWidth, viewportHeight = window.innerHeight) {
