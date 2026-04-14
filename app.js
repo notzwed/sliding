@@ -32,6 +32,7 @@
   const CHAOS_LOOP_INTERVAL_MS = 260;
   const CHAOS_PRESENCE_PUSH_MS = 1500;
   const CHAOS_SNAPSHOT_PUSH_MS = 320;
+  const CHAOS_ACTIVE_WINDOW_MS = 4500;
 
   const installGate = document.getElementById("installGate");
   const installAction = document.getElementById("installAction");
@@ -1852,7 +1853,10 @@
     if (control.stage === "finished") {
       setChaosVoteUi("finished");
       setChallengeStatus("Chaos match finished.");
+      return;
     }
+    setChaosVoteUi("lobby");
+    setChallengeStatus("Chaos syncing...");
   };
 
   const resolveChaosFinal = (control, players) => {
@@ -1935,8 +1939,13 @@
       return;
     }
     const now = Date.now();
+    const activePlayers = players.filter((player) => {
+      const terminal = player.result === "won" || player.result === "lost";
+      const fresh = Number.isFinite(player.updatedAt) ? (now - player.updatedAt <= CHAOS_ACTIVE_WINDOW_MS) : true;
+      return terminal || fresh;
+    });
     if (control.stage === "vote_map") {
-      const eligible = players.filter((player) => readNumber(player.round, 1) === readNumber(control.round, 1));
+      const eligible = activePlayers.filter((player) => readNumber(player.round, 1) === readNumber(control.round, 1));
       const allVoted = eligible.length > 0 && eligible.every((player) => typeof player.mapVote === "string" && player.mapVote.length > 0);
       if (allVoted || now >= readNumber(control.voteDeadlineMs, now + 1)) {
         const mapChoice = pickVoteWinner(eligible, "mapVote", "medium");
@@ -1952,7 +1961,7 @@
       return;
     }
     if (control.stage === "vote_modifier") {
-      const eligible = players.filter((player) => readNumber(player.round, 1) === readNumber(control.round, 1));
+      const eligible = activePlayers.filter((player) => readNumber(player.round, 1) === readNumber(control.round, 1));
       const allVoted = eligible.length > 0 && eligible.every((player) => typeof player.modifierVote === "string" && player.modifierVote.length > 0);
       if (allVoted || now >= readNumber(control.voteDeadlineMs, now + 1)) {
         const modifierChoice = pickVoteWinner(eligible, "modifierVote", "none");
@@ -1973,7 +1982,9 @@
       return;
     }
     const round = Math.max(1, readNumber(control.round, 1));
-    const roundPlayers = players.filter((player) => readNumber(player.round, 1) === round);
+    const roundPlayersRaw = players.filter((player) => readNumber(player.round, 1) === round);
+    const roundPlayersActive = activePlayers.filter((player) => readNumber(player.round, 1) === round);
+    const roundPlayers = roundPlayersActive.length ? roundPlayersActive : roundPlayersRaw;
     if (!roundPlayers.length) {
       return;
     }
@@ -2057,11 +2068,13 @@
 
         if (control.stage === "countdown") {
           const startAt = readNumber(control.startAtMs, 0);
-          if (startAt > 0 && Date.now() >= startAt) {
+          if (startAt > 0 && now >= startAt) {
             if (chaosHost) {
               await upsertChaosControl(room, { ...control, stage: "playing" });
+            } else if ((now - startAt) > 850) {
+              // Fallback for clients when host stage propagation is delayed.
+              ensureChaosRoundRunning(control);
             }
-            ensureChaosRoundRunning(control);
             chaosPlayerMeta.stage = "playing";
             chaosPlayerMeta.round = readNumber(control.round, 1);
             chaosPlayerMeta.result = "playing";
