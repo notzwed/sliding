@@ -3486,6 +3486,9 @@
     }
 
     drawOrbs(ctx) {
+      if (this.isChallengeRun && this.challengeModifier === "no_orbs") {
+        return;
+      }
       const { cellSize, frameX, frameY, viewportWidth, viewportHeight } = this.boardMetrics;
       const pulse = 0.78 + Math.sin(this.levelTime * 3.6) * 0.08;
       const glowStrength = this.performanceProfile.glowStrength;

@@ -1974,13 +1974,18 @@
     }
     const round = Math.max(1, readNumber(control.round, 1));
     const roundPlayers = players.filter((player) => readNumber(player.round, 1) === round);
-    const finished = roundPlayers.filter((player) => player.result === "won" || player.result === "lost");
-    if (!finished.length || finished.length < roundPlayers.length) {
+    if (!roundPlayers.length) {
       return;
     }
+    const finished = roundPlayers.filter((player) => player.result === "won" || player.result === "lost");
     const winners = roundPlayers
       .filter((player) => player.result === "won")
       .sort((a, b) => readNumber(a.runMs, 0) - readNumber(b.runMs, 0));
+
+    // If at least one player wins, close the round immediately for competitive consistency.
+    if (!winners.length && (!finished.length || finished.length < roundPlayers.length)) {
+      return;
+    }
     const wins = { ...(control.wins || {}) };
     if (winners.length) {
       const winnerId = winners[0].deviceId;
@@ -2037,7 +2042,12 @@
           chaosPlayerMeta.modifierVote = typeof local.modifierVote === "string" ? local.modifierVote : "";
           chaosPlayerMeta.round = readNumber(local.round, chaosPlayerMeta.round);
         }
-        if (!challengeMenu?.classList.contains("hidden")) {
+        const gameplayPhase = control.stage === "countdown" || control.stage === "playing" || control.stage === "finished";
+        if (gameplayPhase) {
+          hideChallengeMenu();
+          hideStartMenu();
+        }
+        if (!challengeMenu?.classList.contains("hidden") && !gameplayPhase) {
           updateChallengeModeUi();
           updateChaosStatus(control, players);
         }
